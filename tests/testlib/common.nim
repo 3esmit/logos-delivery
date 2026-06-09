@@ -34,11 +34,6 @@ proc getRng(): ref HmacDrbgContext =
 template rng*(): ref HmacDrbgContext =
   getRng()
 
-## Random byte sequences
-# Copied from waku/waku_noise/noise_utils.randomSeqByte to break the test
-# build's dependency on waku_noise (orphan code that is not part of any
-# production code path; only the keystore + relay-RLN tests reused this
-# helper for generating random secrets).
 proc randomSeqByte*(rng: var HmacDrbgContext, size: int): seq[byte] =
   var output = newSeq[byte](size.uint32)
   hmacDrbgGenerate(rng, output)
