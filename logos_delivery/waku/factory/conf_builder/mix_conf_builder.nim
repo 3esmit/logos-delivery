@@ -5,6 +5,8 @@ import ../waku_conf, logos_delivery/waku/waku_mix
 logScope:
   topics = "waku conf builder mix"
 
+const DefaultMixEnabled: bool = false
+
 ##################################
 ## Mix Config Builder ##
 ##################################
@@ -62,7 +64,7 @@ proc withGifterAuthKey*(b: var MixConfBuilder, authKey: string) =
   b.gifterAuthKey = authKey
 
 proc build*(b: MixConfBuilder): Result[Option[MixConf], string] =
-  if not b.enabled.get(false):
+  if not b.enabled.get(DefaultMixEnabled):
     return ok(none[MixConf]())
   else:
     if b.mixKey.isSome():
