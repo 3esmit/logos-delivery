@@ -62,6 +62,7 @@ proc newWakuSwitch*(
     privKey = none(crypto.PrivateKey),
     address = MultiAddress.init("/ip4/127.0.0.1/tcp/0").tryGet(),
     wsAddress = none(MultiAddress),
+    quicAddress = none(MultiAddress),
     secureManagers: openarray[SecureProtocol] = [SecureProtocol.Noise],
     transportFlags: set[ServerFlags] = {},
     rng: libp2p_rng.Rng,
@@ -92,7 +93,6 @@ proc newWakuSwitch*(
     .withYamux()
     .withMplex(inTimeout, outTimeout)
     .withNoise()
-    .withTcpTransport(transportFlags)
     .withNameResolver(nameResolver)
     .withSignedPeerRecord(sendSignedPeerRecord)
     .withCircuitRelay(circuitRelay)
@@ -107,15 +107,25 @@ proc newWakuSwitch*(
     b = b.withAgentVersion(agentString.get())
   if privKey.isSome():
     b = b.withPrivateKey(privKey.get())
+  # tcp always; ws/quic added when their addr is set
+  var addresses: seq[MultiAddress]
   if wsAddress.isSome():
-    b = b.withAddresses(@[wsAddress.get(), address])
+    addresses.add(wsAddress.get())
+  addresses.add(address)
+  if quicAddress.isSome():
+    addresses.add(quicAddress.get())
+  b = b.withAddresses(addresses)
 
+  b = b.withTcpTransport(transportFlags)
+
+  if wsAddress.isSome():
     if wssEnabled:
       b = b.withWssTransport(secureKeyPath, secureCertPath)
     else:
       b = b.withWsTransport()
-  else:
-    b = b.withAddress(address)
+
+  if quicAddress.isSome():
+    b = b.withQuicTransport()
 
   if rendezvous.isSome():
     b = b.withRendezVous(rendezvous.get())

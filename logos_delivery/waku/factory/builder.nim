@@ -192,6 +192,7 @@ proc build*(builder: WakuNodeBuilder): Result[WakuNode, string] =
       privKey = builder.nodekey,
       address = builder.netConfig.get().hostAddress,
       wsAddress = builder.netConfig.get().wsHostAddress,
+      quicAddress = builder.netConfig.get().quicHostAddress,
       transportFlags = {ServerFlags.ReuseAddr, ServerFlags.TcpNoDelay},
       # newWakuSwitch now expects libp2p `Rng`; wrap our BearSSL rng.
       rng = libp2p_rng.newBearSslRng(rng),
