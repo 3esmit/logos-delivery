@@ -3,9 +3,9 @@
 import std/options, results
 import testutils/unittests
 import eth/common/[addresses, keys]
-import waku/waku_rln_relay/rln_gifter/rpc
-import waku/waku_rln_relay/rln_gifter/rpc_codec
-import waku/waku_rln_relay/rln_gifter/protocol as rln_gifter_protocol
+import logos_delivery/waku/waku_rln_relay/rln_gifter/rpc
+import logos_delivery/waku/waku_rln_relay/rln_gifter/rpc_codec
+import logos_delivery/waku/waku_rln_relay/rln_gifter/protocol as rln_gifter_protocol
 
 proc eip191Sign(seckey: PrivateKey, idCommitment: openArray[byte]): seq[byte] =
   @(seckey.sign(eip191Message(idCommitment)).toRaw())
