@@ -235,7 +235,9 @@ suite "Health Monitor - events":
     # `waku.node` is read on the messaging path; `conf`/`stateInfo` are supplied
     # solely to satisfy Waku's {.requiresInit.} fields.
     let waku = Waku(
-      node: nodeA, conf: defaultTestWakuConf(), stateInfo: WakuStateInfo.init(nodeA)
+      node: nodeA,
+      conf: defaultTestWakuConf(),
+      stateInfo: WakuStateInfo.init(nodeA, defaultTestWakuConf()),
     )
     let ds = MessagingClient
       .new(MessagingClientConf(useP2PReliability: false), waku)
@@ -346,7 +348,9 @@ suite "Health Monitor - events":
     # `waku.node` is read on the messaging path; `conf`/`stateInfo` are supplied
     # solely to satisfy Waku's {.requiresInit.} fields.
     let waku = Waku(
-      node: nodeA, conf: defaultTestWakuConf(), stateInfo: WakuStateInfo.init(nodeA)
+      node: nodeA,
+      conf: defaultTestWakuConf(),
+      stateInfo: WakuStateInfo.init(nodeA, defaultTestWakuConf()),
     )
     let ds = MessagingClient
       .new(MessagingClientConf(useP2PReliability: false), waku)

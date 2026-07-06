@@ -33,12 +33,6 @@ suite "Wakunode2 - Waku":
 
     let waku = (waitFor Waku.new(conf)).valueOr:
       raiseAssert error
-    defer:
-      (waitFor waku.stop()).isOkOr:
-        raiseAssert error
-
-    (waitFor waku.start()).isOkOr:
-      raiseAssert error
 
     ## When
     let maxMessageSize = waku.stateInfo.getNodeInfoItem(NodeInfoId.MaxMessageSize)
