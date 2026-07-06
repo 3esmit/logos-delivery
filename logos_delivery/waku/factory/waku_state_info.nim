@@ -5,7 +5,12 @@
 ## accessible through the debug API.
 
 import std/[tables, sequtils, strutils]
-import metrics, eth/p2p/discoveryv5/enr, libp2p/peerid, stew/byteutils
+import
+  metrics,
+  eth/p2p/discoveryv5/enr,
+  libp2p/peerid,
+  libp2p/protocols/pubsub/gossipsub,
+  stew/byteutils
 import logos_delivery/waku/[waku_node, net/bound_ports]
 
 type
@@ -17,6 +22,7 @@ type
     MyPeerId
     MyBoundPorts
     MyMixPubKey
+    MaxMessageSize
 
   WakuStateInfo* {.requiresInit.} = object
     node: WakuNode
@@ -52,6 +58,12 @@ proc getNodeInfoItem*(self: WakuStateInfo, infoItemId: NodeInfoId): string =
     if self.node.wakuMix.isNil():
       return ""
     return self.node.wakuMix.pubKey.to0xHex()
+  of NodeInfoId.MaxMessageSize:
+    ## Max message size (in bytes) accepted by the relay protocol.
+    ## Empty when the relay protocol is not mounted on this node.
+    if self.node.wakuRelay.isNil():
+      return ""
+    return $self.node.wakuRelay.maxMessageSize
   else:
     return "unknown info item id"
 
