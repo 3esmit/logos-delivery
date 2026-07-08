@@ -4,8 +4,9 @@ import results, libp2p/crypto/crypto
 import logos_delivery/api/conf/kernel_conf
 import logos_delivery/waku/common/logging
 import logos_delivery/waku/factory/networks_config
+import logos_delivery/messaging/rate_limit_manager/rate_limit_manager
 
-export kernel_conf
+export kernel_conf, rate_limit_manager
 
 type LogosDeliveryMode* {.pure.} = enum
   Edge # client-only node
@@ -52,6 +53,9 @@ type MessagingClientConf* = object
     ## Process log format (TEXT or JSON); applied by the kernel on node creation.
   nodeKey* {.name: "nodekey".}: Opt[crypto.PrivateKey]
     ## P2P node private key (64-char hex): stable identity / peerId across restarts.
+  rateLimit*: RateLimitConfig = RateLimitConfig(
+    epochPeriodSec: DefaultEpochPeriodSec, messagesPerEpoch: DefaultMessagesPerEpoch
+  ) ## RLN-epoch transmission budget enforced by the send service.
 
 proc applyMode*(conf: var WakuNodeConf, mode: LogosDeliveryMode): ConfResult[void] =
   ## Sets the protocol flags implied by the mode.
