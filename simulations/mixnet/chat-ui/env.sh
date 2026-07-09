@@ -21,6 +21,8 @@ export CHAT_SHARD_ID=0
 export CHAT_MIN_MIX_POOL=4
 export CHAT_MIX_REQUIRED=1   # force Required (mix) mode without the UI toggle
 
-# logos-chat-ui flake to run. Override with a local checkout to iterate, e.g.
-#   CHAT_UI="$HOME/Code/logos-chat-ui" ./run_chat_ui.sh A
+# logos-chat-ui flake to run. Override with a local checkout to iterate — a path
+# relative to where you run the script works (run_chat_ui.sh resolves it to an
+# absolute path). With logos-chat-ui cloned beside logos-delivery, e.g.:
+#   CHAT_UI=../../../../logos-chat-ui ./run_chat_ui.sh A
 export CHAT_UI="${CHAT_UI:-github:logos-co/logos-chat-ui?ref=feat/logos-testnetv02-mix}"

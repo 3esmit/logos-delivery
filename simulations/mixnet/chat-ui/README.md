@@ -83,10 +83,16 @@ cd simulations/mixnet/chat-ui
 Each opens a GUI. The bottom status bar should show **`MIX 5/4`** (mix pool full)
 with the send button enabled.
 
-To iterate on a local chat-ui checkout instead of the pushed branch:
+To iterate on a local chat-ui checkout instead of the pushed branch, clone it
+**beside** `logos-delivery` and point `CHAT_UI` at it. The path is relative to
+where you run the script (`run_chat_ui.sh` resolves it to an absolute path):
 
 ```bash
-CHAT_UI="$HOME/Code/logos-chat-ui" ./run_chat_ui.sh A
+# from the same parent dir where you cloned logos-delivery:
+git clone -b feat/logos-testnetv02-mix https://github.com/logos-co/logos-chat-ui
+
+# then, back in simulations/mixnet/chat-ui:
+CHAT_UI=../../../../logos-chat-ui ./run_chat_ui.sh A
 ```
 
 ## 5. Exchange messages

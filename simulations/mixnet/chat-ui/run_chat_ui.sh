@@ -32,5 +32,14 @@ cp -f "$SIM/rln_tree.db" "$DIR/" 2>/dev/null \
   || { echo "missing rln_tree.db — run ../build_setup.sh first"; exit 1; }
 cp -f "$SIM"/rln_keystore_*.json "$DIR/"
 
+# If CHAT_UI is a local checkout (not a flake ref like github:/git+/path:),
+# resolve it to an absolute path NOW — before we cd into the per-client run dir
+# below — so it can be passed relative to where you invoke this script (e.g.
+# CHAT_UI=../../../../logos-chat-ui). Flake refs don't exist on disk, so the
+# `-e` test skips them and they're left untouched.
+if [ -e "$CHAT_UI" ]; then
+  CHAT_UI="$(cd "$CHAT_UI" && pwd)"
+fi
+
 cd "$DIR"
 exec nix run "$CHAT_UI" --accept-flake-config
