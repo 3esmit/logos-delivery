@@ -121,7 +121,7 @@ proc validate(
     check requestId == expectedRequestId
 
 proc createApiNodeConf(
-    mode: messaging_conf.LogosDeliveryMode = messaging_conf.LogosDeliveryMode.Core
+    mode: messaging_conf.MessagingMode = messaging_conf.MessagingMode.Core
 ): WakuNodeConf =
   var conf = MessagingClientConf().toWakuNodeConf(mode).valueOr:
       raiseAssert error
@@ -355,9 +355,7 @@ suite "Waku API - Send":
     var node: LogosDelivery
     lockNewGlobalBrokerContext:
       node = (
-        await LogosDelivery.new(
-          createApiNodeConf(messaging_conf.LogosDeliveryMode.Edge)
-        )
+        await LogosDelivery.new(createApiNodeConf(messaging_conf.MessagingMode.Edge))
       ).valueOr:
         raiseAssert error
       (await node.start()).isOkOr:
@@ -394,9 +392,7 @@ suite "Waku API - Send":
     var node: LogosDelivery
     lockNewGlobalBrokerContext:
       node = (
-        await LogosDelivery.new(
-          createApiNodeConf(messaging_conf.LogosDeliveryMode.Edge)
-        )
+        await LogosDelivery.new(createApiNodeConf(messaging_conf.MessagingMode.Edge))
       ).valueOr:
         raiseAssert error
       (await node.start()).isOkOr:
@@ -489,9 +485,7 @@ suite "Waku API - Send":
     var node: LogosDelivery
     lockNewGlobalBrokerContext:
       node = (
-        await LogosDelivery.new(
-          createApiNodeConf(messaging_conf.LogosDeliveryMode.Edge)
-        )
+        await LogosDelivery.new(createApiNodeConf(messaging_conf.MessagingMode.Edge))
       ).valueOr:
         raiseAssert error
       (await node.start()).isOkOr:

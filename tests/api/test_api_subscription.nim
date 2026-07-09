@@ -69,7 +69,7 @@ type TestNetwork = ref object
   publisherPeerInfo: RemotePeerInfo
 
 proc createApiNodeConf(
-    mode: messaging_conf.LogosDeliveryMode = messaging_conf.LogosDeliveryMode.Core,
+    mode: messaging_conf.MessagingMode = messaging_conf.MessagingMode.Core,
     numShards: uint16 = 1,
 ): WakuNodeConf =
   var conf = MessagingClientConf().toWakuNodeConf(mode).valueOr:
@@ -91,7 +91,7 @@ proc setupSubscriberNode(conf: WakuNodeConf): Future[LogosDelivery] {.async.} =
 
 proc setupNetwork(
     numShards: uint16 = 1,
-    mode: messaging_conf.LogosDeliveryMode = messaging_conf.LogosDeliveryMode.Core,
+    mode: messaging_conf.MessagingMode = messaging_conf.MessagingMode.Core,
 ): Future[TestNetwork] {.async.} =
   var net = TestNetwork()
 
@@ -101,7 +101,7 @@ proc setupNetwork(
       "Failed to mount metadata"
     )
     (await net.publisher.mountRelay()).expect("Failed to mount relay")
-    if mode == messaging_conf.LogosDeliveryMode.Edge:
+    if mode == messaging_conf.MessagingMode.Edge:
       await net.publisher.mountFilter()
     await net.publisher.mountLibp2pPing()
     await net.publisher.start()
@@ -120,7 +120,7 @@ proc setupNetwork(
       "Failed to sub publisher"
     )
 
-  if mode == messaging_conf.LogosDeliveryMode.Edge:
+  if mode == messaging_conf.MessagingMode.Edge:
     lockNewGlobalBrokerContext:
       net.meshBuddy = newTestWakuNode(generateSecp256k1Key())
       net.meshBuddy.mountMetadata(3, toSeq(0'u16 ..< numShards)).expect(
@@ -475,7 +475,7 @@ suite "Messaging API, SubscriptionManager":
     await verifyNetworkState(activeSubs)
 
   asyncTest "Subscription API, edge node subscribe and receive message":
-    let net = await setupNetwork(1, messaging_conf.LogosDeliveryMode.Edge)
+    let net = await setupNetwork(1, messaging_conf.MessagingMode.Edge)
     defer:
       await net.teardown()
 
@@ -497,7 +497,7 @@ suite "Messaging API, SubscriptionManager":
     check eventManager.receivedMessages[0].contentTopic == testTopic
 
   asyncTest "Subscription API, edge node ignores unsubscribed content topics":
-    let net = await setupNetwork(1, messaging_conf.LogosDeliveryMode.Edge)
+    let net = await setupNetwork(1, messaging_conf.MessagingMode.Edge)
     defer:
       await net.teardown()
 
@@ -519,7 +519,7 @@ suite "Messaging API, SubscriptionManager":
     check eventManager.receivedMessages.len == 0
 
   asyncTest "Subscription API, edge node unsubscribe stops message receipt":
-    let net = await setupNetwork(1, messaging_conf.LogosDeliveryMode.Edge)
+    let net = await setupNetwork(1, messaging_conf.MessagingMode.Edge)
     defer:
       await net.teardown()
 
@@ -544,7 +544,7 @@ suite "Messaging API, SubscriptionManager":
     check eventManager.receivedMessages.len == 0
 
   asyncTest "Subscription API, edge node overlapping topics isolation":
-    let net = await setupNetwork(1, messaging_conf.LogosDeliveryMode.Edge)
+    let net = await setupNetwork(1, messaging_conf.MessagingMode.Edge)
     defer:
       await net.teardown()
 
@@ -573,7 +573,7 @@ suite "Messaging API, SubscriptionManager":
     check eventManager.receivedMessages[0].contentTopic == topicB
 
   asyncTest "Subscription API, edge node resubscribe after unsubscribe":
-    let net = await setupNetwork(1, messaging_conf.LogosDeliveryMode.Edge)
+    let net = await setupNetwork(1, messaging_conf.MessagingMode.Edge)
     defer:
       await net.teardown()
 
@@ -658,7 +658,7 @@ suite "Messaging API, SubscriptionManager":
 
     await meshBuddy.connectToNodes(@[publisherPeerInfo])
 
-    let conf = createApiNodeConf(messaging_conf.LogosDeliveryMode.Edge, numShards)
+    let conf = createApiNodeConf(messaging_conf.MessagingMode.Edge, numShards)
     var subscriber: LogosDelivery
     lockNewGlobalBrokerContext:
       subscriber =
@@ -786,7 +786,7 @@ suite "Messaging API, SubscriptionManager":
     await meshBuddy.connectToNodes(@[publisherPeerInfo])
     await sparePeer.connectToNodes(@[publisherPeerInfo])
 
-    let conf = createApiNodeConf(messaging_conf.LogosDeliveryMode.Edge, numShards)
+    let conf = createApiNodeConf(messaging_conf.MessagingMode.Edge, numShards)
     var subscriber: LogosDelivery
     lockNewGlobalBrokerContext:
       subscriber =

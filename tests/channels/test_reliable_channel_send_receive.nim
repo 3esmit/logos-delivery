@@ -29,7 +29,7 @@ const TestTimeout = chronos.seconds(15)
 
 proc createApiNodeConf(): WakuNodeConf =
   var conf = MessagingClientConf()
-    .toWakuNodeConf(messaging_conf.LogosDeliveryMode.Core).valueOr:
+    .toWakuNodeConf(messaging_conf.MessagingMode.Core).valueOr:
       raiseAssert error
   conf.listenAddress = parseIpAddress("0.0.0.0")
   conf.tcpPort = Port(0)
