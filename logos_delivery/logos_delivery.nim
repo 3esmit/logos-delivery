@@ -144,7 +144,7 @@ proc new*(
 
 proc new*(
     T: type LogosDelivery,
-    mode: LogosDeliveryMode = LogosDeliveryMode.Core,
+    mode: MessagingMode = MessagingMode.Core,
     preset: string = "",
     messagingOverrides: MessagingClientConf = MessagingClientConf(),
     channelsOverrides: ReliableChannelManagerConf = ReliableChannelManagerConf(),

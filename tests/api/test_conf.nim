@@ -9,7 +9,7 @@ import logos_delivery/waku/common/logging
 
 suite "MessagingClientConf - mode expansion (toWakuNodeConf)":
   test "Core mode enables relay + service protocols":
-    let kc = MessagingClientConf().toWakuNodeConf(LogosDeliveryMode.Core).valueOr:
+    let kc = MessagingClientConf().toWakuNodeConf(MessagingMode.Core).valueOr:
         raiseAssert error
     check:
       kc.relay == true
@@ -20,7 +20,7 @@ suite "MessagingClientConf - mode expansion (toWakuNodeConf)":
       kc.rendezvous == true
 
   test "Edge mode is client-only (no relay/filter/lightpush/store)":
-    let kc = MessagingClientConf().toWakuNodeConf(LogosDeliveryMode.Edge).valueOr:
+    let kc = MessagingClientConf().toWakuNodeConf(MessagingMode.Edge).valueOr:
         raiseAssert error
     check:
       kc.relay == false
@@ -37,7 +37,7 @@ suite "MessagingClientConf - field mapping + transport policy":
       numShardsInCluster: some(4'u16),
       maxMessageSize: some("150KiB"),
     )
-    let kc = mc.toWakuNodeConf(LogosDeliveryMode.Core).valueOr:
+    let kc = mc.toWakuNodeConf(MessagingMode.Core).valueOr:
       raiseAssert error
     check:
       kc.clusterId == some(3'u16)
@@ -45,7 +45,7 @@ suite "MessagingClientConf - field mapping + transport policy":
       kc.maxMessageSize == "150KiB"
 
   test "messaging transport defaults: ephemeral ports, websocket off, quic on":
-    let kc = MessagingClientConf().toWakuNodeConf(LogosDeliveryMode.Core).valueOr:
+    let kc = MessagingClientConf().toWakuNodeConf(MessagingMode.Core).valueOr:
         raiseAssert error
     check:
       kc.tcpPort == Port(0)
@@ -59,7 +59,7 @@ suite "MessagingClientConf - field mapping + transport policy":
       websocketSupport: some(true),
       quicSupport: some(false),
     )
-    let kc = mc.toWakuNodeConf(LogosDeliveryMode.Core).valueOr:
+    let kc = mc.toWakuNodeConf(MessagingMode.Core).valueOr:
       raiseAssert error
     check:
       kc.tcpPort == Port(1234)
@@ -91,7 +91,7 @@ suite "MessagingClientConf - preset resolution":
     let presetConf = resolvePreset("logos.dev").valueOr:
       raiseAssert error
     let merged = merge(presetConf, MessagingClientConf(numShardsInCluster: some(1'u16)))
-    var kernelConf = toWakuNodeConf(merged, LogosDeliveryMode.Core).valueOr:
+    var kernelConf = toWakuNodeConf(merged, MessagingMode.Core).valueOr:
       raiseAssert error
     kernelConf.preset = "logos.dev"
     let wakuConf = kernelConf.toWakuConf().valueOr:
@@ -282,7 +282,7 @@ suite "LogosDelivery.new - construction (the app-dev entry)":
     lockNewGlobalBrokerContext:
       node = (
         await LogosDelivery.new(
-          LogosDeliveryMode.Core,
+          MessagingMode.Core,
           "",
           MessagingClientConf(
             clusterId: some(3'u16),
@@ -304,7 +304,7 @@ suite "LogosDelivery.new - construction (the app-dev entry)":
     lockNewGlobalBrokerContext:
       node = (
         await LogosDelivery.new(
-          LogosDeliveryMode.Core,
+          MessagingMode.Core,
           "logostest",
           MessagingClientConf(listenIpv4: some(parseIpAddress("0.0.0.0"))),
         )
@@ -315,9 +315,7 @@ suite "LogosDelivery.new - construction (the app-dev entry)":
 
 suite "MessagingClientConf - store override":
   test "store opt-in overrides the mode default; protocol flags follow the mode":
-    let kc = MessagingClientConf(store: some(true)).toWakuNodeConf(
-      LogosDeliveryMode.Edge
-    ).valueOr:
+    let kc = MessagingClientConf(store: some(true)).toWakuNodeConf(MessagingMode.Edge).valueOr:
       raiseAssert error
     check:
       kc.store == true # Edge defaults store off; the explicit opt-in wins
@@ -326,7 +324,7 @@ suite "MessagingClientConf - store override":
 suite "LogosDelivery.new - raw kernel construction":
   asyncTest "a fleet node mounts the kernel only; start/stop tolerate the nil layers":
     let kernel = MessagingClientConf(listenIpv4: some(parseIpAddress("0.0.0.0"))).toWakuNodeConf(
-      LogosDeliveryMode.Core
+      MessagingMode.Core
     ).valueOr:
       raiseAssert error
     var node: LogosDelivery

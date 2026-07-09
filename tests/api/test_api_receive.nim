@@ -83,8 +83,7 @@ proc waitForConnectionStatus(
     await EventConnectionStatusChange.dropListener(brokerCtx, handle)
 
 proc createApiNodeConf(numShards: uint16 = 1): WakuNodeConf =
-  var conf = MessagingClientConf()
-    .toWakuNodeConf(messaging_conf.LogosDeliveryMode.Core).valueOr:
+  var conf = MessagingClientConf().toWakuNodeConf(MessagingMode.Core).valueOr:
       raiseAssert error
   conf.listenAddress = parseIpAddress("0.0.0.0")
   conf.tcpPort = Port(0)

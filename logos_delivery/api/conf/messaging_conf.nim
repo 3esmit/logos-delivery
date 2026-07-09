@@ -9,10 +9,9 @@ import logos_delivery/waku/factory/networks_config
 
 export kernel_conf
 
-type LogosDeliveryMode* {.pure.} = enum
+type MessagingMode* {.pure.} = enum
   Edge # client-only node
   Core # full service node
-  Fleet # kernel-only node from a raw kernel config
 
 type MessagingClientConf* = object
   clusterId* {.name: "cluster-id".}: Option[uint16] ## Network cluster id.
@@ -55,33 +54,29 @@ type MessagingClientConf* = object
   nodeKey* {.name: "nodekey".}: Option[crypto.PrivateKey]
     ## P2P node private key (64-char hex): stable identity / peerId across restarts.
 
-proc applyMode*(conf: var WakuNodeConf, mode: LogosDeliveryMode): ConfResult[void] =
+proc applyMode*(conf: var WakuNodeConf, mode: MessagingMode) =
   ## Sets the protocol flags implied by the mode.
   case mode
-  of LogosDeliveryMode.Core:
+  of MessagingMode.Core:
     conf.relay = true
     conf.filter = true
     conf.lightpush = true
     conf.discv5Discovery = some(true)
     conf.peerExchange = true
     conf.rendezvous = true
-  of LogosDeliveryMode.Edge:
+  of MessagingMode.Edge:
     conf.peerExchange = true
     conf.relay = false
     conf.filter = false
     conf.lightpush = false
     conf.store = false
-  of LogosDeliveryMode.Fleet:
-    return
-      err("fleet mode takes a raw kernel config; use LogosDelivery.new(kernelConf)")
-  return ok()
 
 proc toWakuNodeConf*(
-    self: MessagingClientConf, mode: LogosDeliveryMode
+    self: MessagingClientConf, mode: MessagingMode
 ): ConfResult[WakuNodeConf] =
   ## Mode sets the protocol flags; set fields map to their kernel counterpart.
   var conf = ?defaultWakuNodeConf()
-  ?applyMode(conf, mode)
+  applyMode(conf, mode)
 
   if self.store.isSome():
     conf.store = self.store.get()

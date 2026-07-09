@@ -20,7 +20,7 @@ proc init*(T: type LogosDeliveryConf, kernelConf: KernelConf): LogosDeliveryConf
 
 proc init*(
     T: type LogosDeliveryConf,
-    mode: LogosDeliveryMode,
+    mode: MessagingMode,
     preset: string,
     messagingOverrides: MessagingClientConf,
     channelsOverrides: ReliableChannelManagerConf,
