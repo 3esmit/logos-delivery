@@ -396,8 +396,18 @@ procSuite "Peer Manager":
         quicEnabled = false,
       )
       node2Key = generateSecp256k1Key()
-      node2 =
-        newTestWakuNode(node2Key, getPrimaryIPAddr(), Port(0), quicEnabled = false)
+      # The sharded peer manager only dials peers whose ENR advertises the
+      # Relay capability and a matching shard, so node2 must announce them.
+      # (Historically this test passed without the flags because mountRelay
+      # on a started node ran the since-removed startup relay reconnect,
+      # which dialed store peers indiscriminately.)
+      node2 = newTestWakuNode(
+        node2Key,
+        getPrimaryIPAddr(),
+        Port(0),
+        quicEnabled = false,
+        wakuFlags = some(CapabilitiesBitfield.init(@[Relay])),
+      )
 
     node1.mountMetadata(0, @[0'u16]).expect("Mounted Waku Metadata")
     node2.mountMetadata(0, @[0'u16]).expect("Mounted Waku Metadata")
@@ -453,6 +463,15 @@ procSuite "Peer Manager":
 
     (await node3.mountRelay()).isOkOr:
       assert false, "Failed to mount relay"
+
+    # The sharded peer manager works off the shards the node participates in
+    # (relay subscriptions); without one it manages nothing.
+    proc simpleHandler(
+        topic: PubsubTopic, msg: WakuMessage
+    ): Future[void] {.async, gcsafe.} =
+      await sleepAsync(0.millis)
+
+    node3.wakuRelay.subscribe("/waku/2/rs/0/0", simpleHandler)
 
     await node3.peerManager.manageRelayPeers()
 

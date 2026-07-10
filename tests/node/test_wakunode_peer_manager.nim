@@ -591,62 +591,12 @@ suite "Peer Manager":
             serverPeerStore.getPeer(clientPeerId).connectedness ==
               Connectedness.CannotConnect
 
-      suite "Automatic Reconnection":
-        asyncTest "Automatic Reconnection Implementation":
-          # Given two correctly initialised nodes, that are available for reconnection
-          (await server.mountRelay()).isOkOr:
-            assert false, "Failed to mount relay"
-          (await client.mountRelay()).isOkOr:
-            assert false, "Failed to mount relay"
-          await client.connectToNodes(@[serverRemotePeerInfo])
-
-          waitActive:
-            clientPeerStore.getPeer(serverPeerId).connectedness ==
-              Connectedness.Connected and
-              serverPeerStore.getPeer(clientPeerId).connectedness ==
-              Connectedness.Connected
-
-          await client.disconnectNode(serverRemotePeerInfo)
-
-          waitActive:
-            clientPeerStore.getPeer(serverPeerId).connectedness ==
-              Connectedness.CanConnect and
-              serverPeerStore.getPeer(clientPeerId).connectedness ==
-              Connectedness.CanConnect
-
-          # When triggering the reconnection
-          await client.peerManager.reconnectPeers(WakuRelayCodec)
-
-          # Then both peers should be marked as Connected
-          waitActive:
-            clientPeerStore.getPeer(serverPeerId).connectedness ==
-              Connectedness.Connected and
-              serverPeerStore.getPeer(clientPeerId).connectedness ==
-              Connectedness.Connected
-
-          ## Now let's do the same but with backoff period
-          await client.disconnectNode(serverRemotePeerInfo)
-
-          waitActive:
-            clientPeerStore.getPeer(serverPeerId).connectedness ==
-              Connectedness.CanConnect and
-              serverPeerStore.getPeer(clientPeerId).connectedness ==
-              Connectedness.CanConnect
-
-          # When triggering a reconnection with a backoff period
-          let backoffPeriod = chronos.seconds(1)
-          let beforeReconnect = getTime().toUnixFloat()
-          await client.peerManager.reconnectPeers(WakuRelayCodec, backoffPeriod)
-          let reconnectDurationWithBackoffPeriod =
-            getTime().toUnixFloat() - beforeReconnect
-
-          # Then both peers should be marked as Connected
-          check:
-            clientPeerStore.getPeer(serverPeerId).connectedness ==
-              Connectedness.Connected
-            serverPeerStore.getPeer(clientPeerId).connectedness ==
-              Connectedness.Connected
-            reconnectDurationWithBackoffPeriod > backoffPeriod.seconds.float
+      # NOTE: the "Automatic Reconnection" sub-suite that lived here tested
+      # peerManager.reconnectPeers, which was removed together with the
+      # startup relay reconnection (it misfired on discovery-populated peer
+      # stores). On-demand reconnection now goes through the connectivity
+      # maintenance path and is covered by
+      # tests/node/test_wakunode_startup_reconnect.nim.
 
 suite "Handling Connections on Different Networks":
   # TODO: Implement after discv5 and peer manager's interaction is understood

@@ -9,7 +9,8 @@ import ../testlib/[wakucore, wakunode, testasync]
 
 suite "WakuNode - restart (#3979)":
   asyncTest "start -> stop -> start re-opens the listener promptly":
-    ## A restart must not block on the relay-reconnect backoff.
+    ## A restart must complete promptly; historically start() could block on
+    ## a relay-reconnect backoff sweep of the peer store (since removed).
     let
       node1 = newTestWakuNode(generateSecp256k1Key())
       node2 = newTestWakuNode(generateSecp256k1Key())
@@ -21,7 +22,7 @@ suite "WakuNode - restart (#3979)":
 
     await allFutures(node1.start(), node2.start())
 
-    # node1 learns node2 as a relay peer, so a restart triggers reconnectRelayPeers.
+    # node1 learns node2 as a relay peer, so its peer store is non-empty on restart.
     await node1.connectToNodes(@[node2.peerInfo.toRemotePeerInfo()])
 
     await node1.stop()

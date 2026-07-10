@@ -687,30 +687,6 @@ proc connectToRelayPeers*(pm: PeerManager) {.async.} =
     index += numPeersToConnect
     numPendingConnReqs -= numPeersToConnect
 
-proc reconnectPeers*(
-    pm: PeerManager, proto: string, backoffTime: chronos.Duration = chronos.seconds(0)
-) {.async.} =
-  ## Reconnect to peers registered for this protocol. This will update connectedness.
-  ## Especially useful to resume connections from persistent storage after a restart.
-
-  info "Reconnecting peers", proto = proto
-
-  # Proto is not persisted, we need to iterate over all peers.
-  for peerInfo in pm.switch.peerStore.peers(protocolMatcher(proto)):
-    # Check that the peer can be connected
-    if peerInfo.connectedness == CannotConnect:
-      error "Not reconnecting to unreachable or non-existing peer",
-        peerId = peerInfo.peerId
-      continue
-
-    if backoffTime > ZeroDuration:
-      info "Backing off before reconnect",
-        peerId = peerInfo.peerId, backoffTime = backoffTime
-      # We disconnected recently and still need to wait for a backoff period before connecting
-      await sleepAsync(backoffTime)
-
-    await pm.connectToNodes(@[peerInfo])
-
 proc getNumStreams*(pm: PeerManager, protocol: string): (int, int) =
   var
     numStreamsIn = 0

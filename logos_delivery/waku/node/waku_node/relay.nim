@@ -176,7 +176,6 @@ proc mountRelay*(
 
   if node.started:
     await node.wakuRelay.start()
-    await node.reconnectRelayPeers()
 
   node.switch.mount(node.wakuRelay, protocolMatcher(WakuRelayCodec))
 

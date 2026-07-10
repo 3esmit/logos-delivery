@@ -136,7 +136,6 @@ type
     wakuMix*: WakuMix
     wakuKademlia*: WakuKademlia
     ports*: BoundPorts
-    relayReconnectFut*: Future[void]
 
   SubscriptionManager* = ref object of RootObj
     node*: WakuNode
@@ -405,17 +404,6 @@ proc mountStoreSync*(
 
   return ok()
 
-proc reconnectRelayPeers*(node: WakuNode) {.async.} =
-  ## Reconnect to previously-seen WakuRelay peers.
-  if node.wakuRelay.isNil():
-    return
-  if not node.peerManager.switch.peerStore.hasPeers(protocolMatcher(WakuRelayCodec)):
-    return
-  info "Found previous WakuRelay peers. Reconnecting."
-  let backoffPeriod =
-    node.wakuRelay.parameters.pruneBackoff + chronos.seconds(BackoffSlackTime)
-  await node.peerManager.reconnectPeers(WakuRelayCodec, backoffPeriod)
-
 proc selectRandomPeers*(peers: seq[PeerId], numRandomPeers: int): seq[PeerId] =
   var randomPeers = peers
   shuffle(randomPeers)
@@ -621,10 +609,6 @@ proc start*(node: WakuNode) {.async.} =
   ## NOTE: This will dispatch gossipsub start to the WakuRelay.start method override
   await node.switch.start()
 
-  # Reconnect to known relay peers in the background; it waits a prune backoff
-  # and must not block startup.
-  node.relayReconnectFut = node.reconnectRelayPeers()
-
   node.started = true
 
   if not node.wakuKademlia.isNil():
@@ -651,10 +635,6 @@ proc start*(node: WakuNode) {.async.} =
 
 proc stop*(node: WakuNode) {.async.} =
   ## By stopping the switch we are stopping all the underlying mounted protocols
-
-  # Cancel the background relay reconnection (may still be in its backoff wait).
-  if not node.relayReconnectFut.isNil():
-    await node.relayReconnectFut.cancelAndWait()
 
   await node.subscriptionManager.stop()
 
