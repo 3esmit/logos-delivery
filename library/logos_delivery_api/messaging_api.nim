@@ -3,13 +3,13 @@ import chronos, results, ffi
 import stew/byteutils
 import
   logos_delivery/waku/common/base64,
-  logos_delivery/waku/factory/waku,
+  logos_delivery/waku/waku,
   logos_delivery/waku/waku_core/topics/content_topic,
-  logos_delivery/waku/api/[api, types],
+  logos_delivery/api/types,
   ../declare_lib
 
 proc logosdelivery_subscribe(
-    ctx: ptr FFIContext[Waku],
+    ctx: ptr FFIContext[LogosDelivery],
     callback: FFICallBack,
     userData: pointer,
     contentTopicStr: cstring,
@@ -17,17 +17,20 @@ proc logosdelivery_subscribe(
   requireInitializedNode(ctx, "Subscribe"):
     return err(errMsg)
 
+  requireMessaging(ctx, "Subscribe"):
+    return err(errMsg)
+
   # ContentTopic is just a string type alias
   let contentTopic = ContentTopic($contentTopicStr)
 
-  (await api.subscribe(ctx.myLib[], contentTopic)).isOkOr:
+  (await ctx.myLib[].messagingClient.subscribe(contentTopic)).isOkOr:
     let errMsg = $error
     return err("Subscribe failed: " & errMsg)
 
   return ok("")
 
 proc logosdelivery_unsubscribe(
-    ctx: ptr FFIContext[Waku],
+    ctx: ptr FFIContext[LogosDelivery],
     callback: FFICallBack,
     userData: pointer,
     contentTopicStr: cstring,
@@ -35,22 +38,28 @@ proc logosdelivery_unsubscribe(
   requireInitializedNode(ctx, "Unsubscribe"):
     return err(errMsg)
 
+  requireMessaging(ctx, "Unsubscribe"):
+    return err(errMsg)
+
   # ContentTopic is just a string type alias
   let contentTopic = ContentTopic($contentTopicStr)
 
-  api.unsubscribe(ctx.myLib[], contentTopic).isOkOr:
+  ctx.myLib[].messagingClient.unsubscribe(contentTopic).isOkOr:
     let errMsg = $error
     return err("Unsubscribe failed: " & errMsg)
 
   return ok("")
 
 proc logosdelivery_send(
-    ctx: ptr FFIContext[Waku],
+    ctx: ptr FFIContext[LogosDelivery],
     callback: FFICallBack,
     userData: pointer,
     messageJson: cstring,
 ) {.ffi.} =
   requireInitializedNode(ctx, "Send"):
+    return err(errMsg)
+
+  requireMessaging(ctx, "Send"):
     return err(errMsg)
 
   ## Parse the message JSON and send the message
@@ -83,8 +92,8 @@ proc logosdelivery_send(
     contentTopic = contentTopic, payload = payload, ephemeral = ephemeral
   )
 
-  # Send the message
-  let requestId = (await api.send(ctx.myLib[], envelope)).valueOr:
+  # Send the message via the messaging layer's own API.
+  let requestId = (await ctx.myLib[].messagingClient.send(envelope)).valueOr:
     let errMsg = $error
     return err("Send failed: " & errMsg)
 

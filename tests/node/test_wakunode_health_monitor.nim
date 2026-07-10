@@ -19,14 +19,17 @@ import
     node/waku_node/store,
     node/waku_node/lightpush,
     node/waku_node/filter,
-    events/health_events,
-    events/peer_events,
+    api/events/health_events,
+    api/events/peer_events,
     waku_archive,
   ]
 
 import ../testlib/[wakunode, wakucore], ../waku_archive/archive_utils
 import logos_delivery/waku/node/subscription_manager
+import logos_delivery/waku/waku
+import logos_delivery/waku/factory/waku_state_info
 import logos_delivery/messaging/messaging_client
+import logos_delivery/messaging/messaging_client_lifecycle
 
 const MockDLow = 4 # Mocked GossipSub DLow value
 
@@ -228,8 +231,15 @@ suite "Health Monitor - events":
       nodeA.mountMetadata(1, @[0'u16]).expect("Node A failed to mount metadata")
       await nodeA.start()
 
-    let ds =
-      MessagingClient.new(false, nodeA).expect("Failed to create MessagingClient")
+    # MessagingClient now depends on the Waku kernel, not the raw node. Only
+    # `waku.node` is read on the messaging path; `conf`/`stateInfo` are supplied
+    # solely to satisfy Waku's {.requiresInit.} fields.
+    let waku = Waku(
+      node: nodeA, conf: defaultTestWakuConf(), stateInfo: WakuStateInfo.init(nodeA)
+    )
+    let ds = MessagingClient
+      .new(MessagingClientConf(reliabilityEnabled: some(false)), waku)
+      .expect("Failed to create MessagingClient")
     ds.start().expect("Failed to start MessagingClient")
 
     let monitorA = NodeHealthMonitor.new(nodeA)
@@ -332,8 +342,15 @@ suite "Health Monitor - events":
       nodeA.mountMetadata(1, @[0'u16]).expect("Node A failed to mount metadata")
       await nodeA.start()
 
-    let ds =
-      MessagingClient.new(false, nodeA).expect("Failed to create MessagingClient")
+    # MessagingClient now depends on the Waku kernel, not the raw node. Only
+    # `waku.node` is read on the messaging path; `conf`/`stateInfo` are supplied
+    # solely to satisfy Waku's {.requiresInit.} fields.
+    let waku = Waku(
+      node: nodeA, conf: defaultTestWakuConf(), stateInfo: WakuStateInfo.init(nodeA)
+    )
+    let ds = MessagingClient
+      .new(MessagingClientConf(reliabilityEnabled: some(false)), waku)
+      .expect("Failed to create MessagingClient")
     ds.start().expect("Failed to start MessagingClient")
     let subMgr = nodeA.subscriptionManager
 

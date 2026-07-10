@@ -4,7 +4,7 @@ import chronos, chronicles
 import brokers/broker_context
 import logos_delivery/waku/[waku_core], logos_delivery/waku/waku_lightpush/[common, rpc]
 import logos_delivery/waku/requests/health_requests
-import logos_delivery/waku/api/types
+import logos_delivery/api/types
 import ./[delivery_task, send_processor]
 
 logScope:
@@ -76,6 +76,8 @@ method sendImpl*(self: RelaySendProcessor, task: DeliveryTask) {.async.} =
       noOfPeers = noOfPublishedPeers
     task.state = DeliveryState.SuccessfullyPropagated
     task.deliveryTime = Moment.now()
+    if task.firstPropagatedTime.isNone():
+      task.firstPropagatedTime = some(Moment.now())
   else:
     # It shall not happen, but still covering it
     task.state = self.fallbackStateToSet

@@ -15,7 +15,7 @@ import
     waku_lightpush_legacy,
     waku_lightpush_legacy/common,
     waku_lightpush_legacy/protocol_metrics,
-    waku_rln_relay,
+    rln,
   ],
   ../testlib/[wakucore, wakunode, testasync, futures, testutils],
   ../resources/payloads,
@@ -36,8 +36,8 @@ suite "Waku Legacy Lightpush - End To End":
       serverKey = generateSecp256k1Key()
       clientKey = generateSecp256k1Key()
 
-    server = newTestWakuNode(serverKey, parseIpAddress("0.0.0.0"), Port(0))
-    client = newTestWakuNode(clientKey, parseIpAddress("0.0.0.0"), Port(0))
+    server = newTestWakuNode(serverKey)
+    client = newTestWakuNode(clientKey)
 
     await allFutures(server.start(), client.start())
     await server.start()
@@ -59,8 +59,7 @@ suite "Waku Legacy Lightpush - End To End":
   suite "Assessment of Message Relaying Mechanisms":
     asyncTest "Via 11/WAKU2-RELAY from Relay/Full Node":
       # Given a light lightpush client
-      let lightpushClient =
-        newTestWakuNode(generateSecp256k1Key(), parseIpAddress("0.0.0.0"), Port(0))
+      let lightpushClient = newTestWakuNode(generateSecp256k1Key())
       lightpushClient.mountLegacyLightpushClient()
 
       # When the client publishes a message
@@ -100,6 +99,7 @@ suite "RLN Proofs as a Lightpush Service":
     client {.threadvar.}: WakuNode
     anvilProc {.threadvar.}: Process
     manager {.threadvar.}: OnchainGroupManager
+    wakuRlnConfig {.threadvar.}: WakuRlnConfig
 
     serverRemotePeerInfo {.threadvar.}: RemotePeerInfo
     pubsubTopic {.threadvar.}: PubsubTopic
@@ -111,15 +111,15 @@ suite "RLN Proofs as a Lightpush Service":
       serverKey = generateSecp256k1Key()
       clientKey = generateSecp256k1Key()
 
-    server = newTestWakuNode(serverKey, parseIpAddress("0.0.0.0"), Port(0))
-    client = newTestWakuNode(clientKey, parseIpAddress("0.0.0.0"), Port(0))
+    server = newTestWakuNode(serverKey)
+    client = newTestWakuNode(clientKey)
 
     anvilProc = runAnvil(stateFile = some(DEFAULT_ANVIL_STATE_PATH))
     manager = waitFor setupOnchainGroupManager(deployContracts = false)
 
     # mount rln-relay
     # match prod epoch window to reduce test flake
-    let wakuRlnConfig = getWakuRlnConfig(
+    wakuRlnConfig = getWakuRlnConfig(
       manager = manager, index = MembershipIndex(1), epochSizeSec = 600
     )
 
@@ -128,11 +128,11 @@ suite "RLN Proofs as a Lightpush Service":
 
     (await server.mountRelay()).isOkOr:
       assert false, "Failed to mount relay"
-    await server.mountRlnRelay(wakuRlnConfig)
+    await server.setRlnValidator(wakuRlnConfig)
     check (await server.mountLegacyLightPush()).isOk()
     client.mountLegacyLightPushClient()
 
-    let manager1 = cast[OnchainGroupManager](server.wakuRlnRelay.groupManager)
+    let manager1 = cast[OnchainGroupManager](server.rln.groupManager)
     let idCredentials1 = generateCredentials()
 
     (waitFor manager1.register(idCredentials1, UserMessageLimit(20))).isOkOr:
@@ -159,13 +159,18 @@ suite "RLN Proofs as a Lightpush Service":
   suite "Lightpush attaching RLN proofs":
     asyncTest "Message is published when RLN enabled":
       # Given a light lightpush client
-      let lightpushClient =
-        newTestWakuNode(generateSecp256k1Key(), parseIpAddress("0.0.0.0"), Port(0))
+      let lightpushClient = newTestWakuNode(generateSecp256k1Key())
       lightpushClient.mountLegacyLightPushClient()
+
+      # Attach the RLN proof. In production the client mounts RLN and generates the
+      # proof in legacyLightpushPublish; here we generate it using the server's RLN
+      # instance since both ends share group state via the in-memory manager.
+      let msgWithProof =
+        (await checkAndGenerateRLNProof(some(server.rln), message)).get()
 
       # When the client publishes a message
       let publishResponse = await lightpushClient.legacyLightpushPublish(
-        some(pubsubTopic), message, serverRemotePeerInfo
+        some(pubsubTopic), msgWithProof, serverRemotePeerInfo
       )
 
       if not publishResponse.isOk():
@@ -180,11 +185,11 @@ suite "Waku Legacy Lightpush message delivery":
     ## Setup
     let
       lightNodeKey = generateSecp256k1Key()
-      lightNode = newTestWakuNode(lightNodeKey, parseIpAddress("0.0.0.0"), Port(0))
+      lightNode = newTestWakuNode(lightNodeKey)
       bridgeNodeKey = generateSecp256k1Key()
-      bridgeNode = newTestWakuNode(bridgeNodeKey, parseIpAddress("0.0.0.0"), Port(0))
+      bridgeNode = newTestWakuNode(bridgeNodeKey)
       destNodeKey = generateSecp256k1Key()
-      destNode = newTestWakuNode(destNodeKey, parseIpAddress("0.0.0.0"), Port(0))
+      destNode = newTestWakuNode(destNodeKey)
 
     await allFutures(destNode.start(), bridgeNode.start(), lightNode.start())
 
@@ -234,7 +239,7 @@ suite "Waku Legacy Lightpush mounting behavior":
     ## Given a node without Relay mounted
     let
       key = generateSecp256k1Key()
-      node = newTestWakuNode(key, parseIpAddress("0.0.0.0"), Port(0))
+      node = newTestWakuNode(key)
 
     # Do not mount Relay on purpose
     check node.wakuRelay.isNil()

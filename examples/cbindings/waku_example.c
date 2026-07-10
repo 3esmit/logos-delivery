@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <argp.h>
+#include <getopt.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -50,12 +50,6 @@ struct ConfigNode
   int relay;
   char peers[2048];
   int store;
-  char storeNode[2048];
-  char storeRetentionPolicy[64];
-  char storeDbUrl[256];
-  int storeVacuum;
-  int storeDbMigration;
-  int storeMaxNumDbConnections;
 };
 
 // libwaku Context
@@ -64,51 +58,35 @@ void *ctx;
 // For the case of C language we don't need to store a particular userData
 void *userData = NULL;
 
-// Arguments parsing
-static char doc[] = "\nC example that shows how to use the waku library.";
-static char args_doc[] = "";
-
-static struct argp_option options[] = {
-    {"host", 'h', "HOST", 0, "IP to listen for for LibP2P traffic. (default: \"0.0.0.0\")"},
-    {"port", 'p', "PORT", 0, "TCP listening port. (default: \"60000\")"},
-    {"key", 'k', "KEY", 0, "P2P node private key as 64 char hex string."},
-    {"relay", 'r', "RELAY", 0, "Enable relay protocol: 1 or 0. (default: 1)"},
-    {"peers", 'a', "PEERS", 0, "Comma-separated list of peer-multiaddress to connect\
- to. (default: \"\") e.g. \"/ip4/127.0.0.1/tcp/60001/p2p/16Uiu2HAmVFXtAfSj4EiR7mL2KvL4EE2wztuQgUSBoj2Jx2KeXFLN\""},
-    {0}};
-
-static error_t parse_opt(int key, char *arg, struct argp_state *state)
+// Arguments parsing. Uses POSIX getopt so the example builds on glibc and on
+// macOS/BSD alike (argp is a GNU libc extension not available everywhere).
+static void parse_args(int argc, char **argv, struct ConfigNode *cfgNode)
 {
-
-  struct ConfigNode *cfgNode = state->input;
-  switch (key)
+  int opt;
+  while ((opt = getopt(argc, argv, "h:p:k:r:a:")) != -1)
   {
-  case 'h':
-    snprintf(cfgNode->host, 128, "%s", arg);
-    break;
-  case 'p':
-    cfgNode->port = atoi(arg);
-    break;
-  case 'k':
-    snprintf(cfgNode->key, 128, "%s", arg);
-    break;
-  case 'r':
-    cfgNode->relay = atoi(arg);
-    break;
-  case 'a':
-    snprintf(cfgNode->peers, 2048, "%s", arg);
-    break;
-  case ARGP_KEY_ARG:
-    if (state->arg_num >= 1) /* Too many arguments. */
-      argp_usage(state);
-    break;
-  case ARGP_KEY_END:
-    break;
-  default:
-    return ARGP_ERR_UNKNOWN;
+    switch (opt)
+    {
+    case 'h':
+      snprintf(cfgNode->host, 128, "%s", optarg);
+      break;
+    case 'p':
+      cfgNode->port = atoi(optarg);
+      break;
+    case 'k':
+      snprintf(cfgNode->key, 128, "%s", optarg);
+      break;
+    case 'r':
+      cfgNode->relay = atoi(optarg);
+      break;
+    case 'a':
+      snprintf(cfgNode->peers, 2048, "%s", optarg);
+      break;
+    default:
+      printf("Wrong parameters\n");
+      exit(1);
+    }
   }
-
-  return 0;
 }
 
 void signal_cond()
@@ -118,8 +96,6 @@ void signal_cond()
   pthread_cond_signal(&cond);
   pthread_mutex_unlock(&mutex);
 }
-
-static struct argp argp = {options, parse_opt, args_doc, doc, 0, 0, 0};
 
 void event_handler(int callerRet, const char *msg, size_t len, void *userData)
 {
@@ -308,47 +284,26 @@ int main(int argc, char **argv)
   cfgNode.relay = 1;
 
   cfgNode.store = 0;
-  snprintf(cfgNode.storeNode, 2048, "");
-  snprintf(cfgNode.storeRetentionPolicy, 64, "time:6000000");
-  snprintf(cfgNode.storeDbUrl, 256, "postgres://postgres:test123@localhost:5432/postgres");
-  cfgNode.storeVacuum = 0;
-  cfgNode.storeDbMigration = 0;
-  cfgNode.storeMaxNumDbConnections = 30;
 
-  if (argp_parse(&argp, argc, argv, 0, 0, &cfgNode) == ARGP_ERR_UNKNOWN)
-  {
-    show_help_and_exit();
-  }
+  parse_args(argc, argv, &cfgNode);
 
   char jsonConfig[5000];
   snprintf(jsonConfig, 5000, "{ \
-                                    \"clusterId\": 16, \
-                                    \"shards\": [ 1, 32, 64, 128, 256 ], \
-                                    \"numShardsInNetwork\": 257, \
-                                    \"listenAddress\": \"%s\",    \
-                                    \"tcpPort\": %d,        \
-                                    \"relay\": %s,       \
-                                    \"store\": %s,       \
-                                    \"storeMessageDbUrl\": \"%s\",  \
-                                    \"storeMessageRetentionPolicy\": \"%s\",  \
-                                    \"storeMaxNumDbConnections\": %d , \
-                                    \"logLevel\": \"DEBUG\", \
-                                    \"discv5Discovery\": true, \
-                                    \"discv5BootstrapNodes\": \
-                                        [\"enr:-QEKuED9AJm2HGgrRpVaJY2nj68ao_QiPeUT43sK-aRM7sMJ6R4G11OSDOwnvVacgN1sTw-K7soC5dzHDFZgZkHU0u-XAYJpZIJ2NIJpcISnYxMvim11bHRpYWRkcnO4WgAqNiVib290LTAxLmRvLWFtczMuc3RhdHVzLnByb2Quc3RhdHVzLmltBnZfACw2JWJvb3QtMDEuZG8tYW1zMy5zdGF0dXMucHJvZC5zdGF0dXMuaW0GAbveA4Jyc40AEAUAAQAgAEAAgAEAiXNlY3AyNTZrMaEC3rRtFQSgc24uWewzXaxTY8hDAHB8sgnxr9k8Rjb5GeSDdGNwgnZfg3VkcIIjKIV3YWt1Mg0\", \"enr:-QEcuED7ww5vo2rKc1pyBp7fubBUH-8STHEZHo7InjVjLblEVyDGkjdTI9VdqmYQOn95vuQH-Htku17WSTzEufx-Wg4mAYJpZIJ2NIJpcIQihw1Xim11bHRpYWRkcnO4bAAzNi5ib290LTAxLmdjLXVzLWNlbnRyYWwxLWEuc3RhdHVzLnByb2Quc3RhdHVzLmltBnZfADU2LmJvb3QtMDEuZ2MtdXMtY2VudHJhbDEtYS5zdGF0dXMucHJvZC5zdGF0dXMuaW0GAbveA4Jyc40AEAUAAQAgAEAAgAEAiXNlY3AyNTZrMaECxjqgDQ0WyRSOilYU32DA5k_XNlDis3m1VdXkK9xM6kODdGNwgnZfg3VkcIIjKIV3YWt1Mg0\", \"enr:-QEcuEAoShWGyN66wwusE3Ri8hXBaIkoHZHybUB8cCPv5v3ypEf9OCg4cfslJxZFANl90s-jmMOugLUyBx4EfOBNJ6_VAYJpZIJ2NIJpcIQI2hdMim11bHRpYWRkcnO4bAAzNi5ib290LTAxLmFjLWNuLWhvbmdrb25nLWMuc3RhdHVzLnByb2Quc3RhdHVzLmltBnZfADU2LmJvb3QtMDEuYWMtY24taG9uZ2tvbmctYy5zdGF0dXMucHJvZC5zdGF0dXMuaW0GAbveA4Jyc40AEAUAAQAgAEAAgAEAiXNlY3AyNTZrMaEDP7CbRk-YKJwOFFM4Z9ney0GPc7WPJaCwGkpNRyla7mCDdGNwgnZfg3VkcIIjKIV3YWt1Mg0\"], \
-                                    \"discv5UdpPort\": 9999, \
-                                    \"dnsDiscoveryUrl\": \"enrtree://AMOJVZX4V6EXP7NTJPMAYJYST2QP6AJXYW76IU6VGJS7UVSNDYZG4@boot.prod.status.nodes.status.im\", \
-                                    \"dnsDiscoveryNameServers\": [\"8.8.8.8\", \"1.0.0.1\"] \
+                                    \"mode\": \"Core\", \
+                                    \"preset\": \"status.prod\", \
+                                    \"messagingOverrides\": { \
+                                        \"listen-address\": \"%s\",    \
+                                        \"tcp-port\": %d,        \
+                                        \"store\": %s,       \
+                                        \"log-level\": \"DEBUG\", \
+                                        \"discv5-udp-port\": 9999 \
+                                    } \
                                 }",
            cfgNode.host,
            cfgNode.port,
-           cfgNode.relay ? "true" : "false",
-           cfgNode.store ? "true" : "false",
-           cfgNode.storeDbUrl,
-           cfgNode.storeRetentionPolicy,
-           cfgNode.storeMaxNumDbConnections);
+           cfgNode.store ? "true" : "false");
 
-  ctx = waku_new(jsonConfig, event_handler, userData);
+  ctx = logosdelivery_create_node(jsonConfig, event_handler, userData);
   waitForCallback();
 
   WAKU_CALL(waku_default_pubsub_topic(ctx, print_default_pubsub_topic, userData));
@@ -359,7 +314,7 @@ int main(int argc, char **argv)
 
   logosdelivery_set_event_callback(ctx, on_event_received, userData);
 
-  waku_start(ctx, event_handler, userData);
+  logosdelivery_start_node(ctx, event_handler, userData);
   waitForCallback();
 
   WAKU_CALL(waku_listen_addresses(ctx, event_handler, userData));

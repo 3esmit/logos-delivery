@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <argp.h>
+#include <getopt.h>
 #include <signal.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -60,51 +60,35 @@ struct ConfigNode
     char peers[2048];
 };
 
-// Arguments parsing
-static char doc[] = "\nC example that shows how to use the waku library.";
-static char args_doc[] = "";
-
-static struct argp_option options[] = {
-    {"host", 'h', "HOST", 0, "IP to listen for for LibP2P traffic. (default: \"0.0.0.0\")"},
-    {"port", 'p', "PORT", 0, "TCP listening port. (default: \"60000\")"},
-    {"key", 'k', "KEY", 0, "P2P node private key as 64 char hex string."},
-    {"relay", 'r', "RELAY", 0, "Enable relay protocol: 1 or 0. (default: 1)"},
-    {"peers", 'a', "PEERS", 0, "Comma-separated list of peer-multiaddress to connect\
- to. (default: \"\") e.g. \"/ip4/127.0.0.1/tcp/60001/p2p/16Uiu2HAmVFXtAfSj4EiR7mL2KvL4EE2wztuQgUSBoj2Jx2KeXFLN\""},
-    {0}};
-
-static error_t parse_opt(int key, char *arg, struct argp_state *state)
+// Arguments parsing. Uses POSIX getopt so the example builds on glibc and on
+// macOS/BSD alike (argp is a GNU libc extension not available everywhere).
+static void parse_args(int argc, char **argv, struct ConfigNode *cfgNode)
 {
-
-    struct ConfigNode *cfgNode = (ConfigNode *)state->input;
-    switch (key)
+    int opt;
+    while ((opt = getopt(argc, argv, "h:p:k:r:a:")) != -1)
     {
-    case 'h':
-        snprintf(cfgNode->host, 128, "%s", arg);
-        break;
-    case 'p':
-        cfgNode->port = atoi(arg);
-        break;
-    case 'k':
-        snprintf(cfgNode->key, 128, "%s", arg);
-        break;
-    case 'r':
-        cfgNode->relay = atoi(arg);
-        break;
-    case 'a':
-        snprintf(cfgNode->peers, 2048, "%s", arg);
-        break;
-    case ARGP_KEY_ARG:
-        if (state->arg_num >= 1) /* Too many arguments. */
-            argp_usage(state);
-        break;
-    case ARGP_KEY_END:
-        break;
-    default:
-        return ARGP_ERR_UNKNOWN;
+        switch (opt)
+        {
+        case 'h':
+            snprintf(cfgNode->host, 128, "%s", optarg);
+            break;
+        case 'p':
+            cfgNode->port = atoi(optarg);
+            break;
+        case 'k':
+            snprintf(cfgNode->key, 128, "%s", optarg);
+            break;
+        case 'r':
+            cfgNode->relay = atoi(optarg);
+            break;
+        case 'a':
+            snprintf(cfgNode->peers, 2048, "%s", optarg);
+            break;
+        default:
+            printf("Wrong parameters\n");
+            exit(1);
+        }
     }
-
-    return 0;
 }
 
 void event_handler(const char *msg, size_t len)
@@ -128,8 +112,6 @@ auto cify(F &&f)
         return fn(msg, len);
     };
 }
-
-static struct argp argp = {options, parse_opt, args_doc, doc, 0, 0, 0};
 
 // Beginning of UI program logic
 
@@ -254,33 +236,26 @@ int main(int argc, char **argv)
     cfgNode.port = 60000;
     cfgNode.relay = 1;
 
-    if (argp_parse(&argp, argc, argv, 0, 0, &cfgNode) == ARGP_ERR_UNKNOWN)
-    {
-        show_help_and_exit();
-    }
+    parse_args(argc, argv, &cfgNode);
 
     char jsonConfig[2048];
     snprintf(jsonConfig, 2048, "{ \
-                                    \"host\": \"%s\",   \
-                                    \"port\": %d,       \
-                                    \"relay\": true,      \
-                                    \"clusterId\": 16, \
-                                    \"shards\": [ 1, 32, 64, 128, 256 ], \
-                                    \"logLevel\": \"FATAL\", \
-                                    \"discv5Discovery\": true, \
-                                    \"discv5BootstrapNodes\": \
-                                        [\"enr:-QESuEB4Dchgjn7gfAvwB00CxTA-nGiyk-aALI-H4dYSZD3rUk7bZHmP8d2U6xDiQ2vZffpo45Jp7zKNdnwDUx6g4o6XAYJpZIJ2NIJpcIRA4VDAim11bHRpYWRkcnO4XAArNiZub2RlLTAxLmRvLWFtczMud2FrdS5zYW5kYm94LnN0YXR1cy5pbQZ2XwAtNiZub2RlLTAxLmRvLWFtczMud2FrdS5zYW5kYm94LnN0YXR1cy5pbQYfQN4DgnJzkwABCAAAAAEAAgADAAQABQAGAAeJc2VjcDI1NmsxoQOvD3S3jUNICsrOILlmhENiWAMmMVlAl6-Q8wRB7hidY4N0Y3CCdl-DdWRwgiMohXdha3UyDw\", \"enr:-QEkuEBIkb8q8_mrorHndoXH9t5N6ZfD-jehQCrYeoJDPHqT0l0wyaONa2-piRQsi3oVKAzDShDVeoQhy0uwN1xbZfPZAYJpZIJ2NIJpcIQiQlleim11bHRpYWRkcnO4bgA0Ni9ub2RlLTAxLmdjLXVzLWNlbnRyYWwxLWEud2FrdS5zYW5kYm94LnN0YXR1cy5pbQZ2XwA2Ni9ub2RlLTAxLmdjLXVzLWNlbnRyYWwxLWEud2FrdS5zYW5kYm94LnN0YXR1cy5pbQYfQN4DgnJzkwABCAAAAAEAAgADAAQABQAGAAeJc2VjcDI1NmsxoQKnGt-GSgqPSf3IAPM7bFgTlpczpMZZLF3geeoNNsxzSoN0Y3CCdl-DdWRwgiMohXdha3UyDw\"], \
-                                    \"discv5UdpPort\": 9999, \
-                                    \"dnsDiscoveryUrl\": \"enrtree://AMOJVZX4V6EXP7NTJPMAYJYST2QP6AJXYW76IU6VGJS7UVSNDYZG4@boot.prod.status.nodes.status.im\", \
-                                    \"dnsDiscoveryNameServers\": [\"8.8.8.8\", \"1.0.0.1\"] \
+                                    \"mode\": \"Core\", \
+                                    \"preset\": \"status.prod\", \
+                                    \"messagingOverrides\": { \
+                                        \"listen-address\": \"%s\", \
+                                        \"tcp-port\": %d, \
+                                        \"log-level\": \"FATAL\", \
+                                        \"discv5-udp-port\": 9999 \
+                                    } \
                                 }",
              cfgNode.host,
              cfgNode.port);
 
     void *ctx =
-        waku_new(jsonConfig,
+        logosdelivery_create_node(jsonConfig,
                  cify([](const char *msg, size_t len)
-                      { std::cout << "waku_new feedback: " << msg << std::endl; }),
+                      { std::cout << "logosdelivery_create_node feedback: " << msg << std::endl; }),
                  nullptr);
     waitForCallback();
 
@@ -317,7 +292,7 @@ int main(int argc, char **argv)
                             { event_handler(msg, len); }),
                        nullptr);
 
-    WAKU_CALL(waku_start(ctx,
+    WAKU_CALL(logosdelivery_start_node(ctx,
                          cify([&](const char *msg, size_t len)
                               { event_handler(msg, len); }),
                          nullptr));

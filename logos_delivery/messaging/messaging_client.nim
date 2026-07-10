@@ -1,59 +1,44 @@
-import results, chronos
-import chronicles
+## Messaging layer core: the `MessagingClient` type plus its construction and
+## lifecycle. The public operations (subscribe / unsubscribe / send) live in
+## `messaging/api.nim`.
+import std/options
+import results, chronos, chronicles
 import
-  logos_delivery/waku/api/types,
-  logos_delivery/waku/node/[waku_node, subscription_manager],
-  logos_delivery/messaging/delivery_service/[recv_service, send_service],
-  logos_delivery/messaging/delivery_service/send_service/delivery_task
+  logos_delivery/api/conf/messaging_conf,
+  logos_delivery/api/messaging_client_api,
+  logos_delivery/waku/waku,
+  logos_delivery/waku/factory/conf_builder/waku_conf_builder,
+  logos_delivery/messaging/delivery_service/[recv_service, send_service]
+
+export messaging_client_api, messaging_conf
 
 type MessagingClient* = ref object
-  node: WakuNode
+  brokerCtx*: BrokerContext
+  waku*: Waku ## The Waku kernel this layer drives; read by `messaging/api/*`.
   sendService*: SendService
   recvService*: RecvService
-  started: bool
+  started*: bool
 
 proc new*(
-    T: type MessagingClient, useP2PReliability: bool, node: WakuNode
+    T: type MessagingClient, conf: MessagingClientConf, waku: Waku
 ): Result[T, string] =
-  let sendService = ?SendService.new(useP2PReliability, node)
-  let recvService = RecvService.new(node)
-  ok(T(node: node, sendService: sendService, recvService: recvService))
+  ## The messaging layer chains onto Waku: it drives the underlying Waku kernel
+  ## for transport while exposing its own send/recv API.
+  let reliability = conf.reliabilityEnabled.get(DefaultP2pReliability)
+  let sendService = ?SendService.new(reliability, waku)
+  let recvService = RecvService.new(waku)
+  return ok(
+    T(
+      waku: waku,
+      sendService: sendService,
+      recvService: recvService,
+      brokerCtx: waku.brokerCtx,
+    )
+  )
 
-proc start*(self: MessagingClient): Result[void, string] =
-  if self.started:
-    return ok()
-  self.recvService.startRecvService()
-  self.sendService.startSendService()
-  self.started = true
-  ok()
+proc checkApiAvailability*(self: MessagingClient): Result[void, string] =
+  ## Shared guard for the api operation module.
+  if self.isNil():
+    return err("MessagingClient is not initialized")
 
-proc stop*(self: MessagingClient) {.async.} =
-  if not self.started:
-    return
-  await self.sendService.stopSendService()
-  await self.recvService.stopRecvService()
-  self.started = false
-
-proc send*(
-    self: MessagingClient, envelope: MessageEnvelope
-): Future[Result[RequestId, string]] {.async.} =
-  ## High-level messaging API send. Auto-subscribes to the content topic
-  ## (so the local node sees its own gossipsub broadcast), builds a
-  ## `DeliveryTask`, and hands it to the send service. Returns the request
-  ## id the caller can correlate with `MessageSentEvent` / `MessageErrorEvent`.
-  let isSubbed =
-    self.node.subscriptionManager.isSubscribed(envelope.contentTopic).valueOr(false)
-  if not isSubbed:
-    info "Auto-subscribing to topic on send", contentTopic = envelope.contentTopic
-    self.node.subscriptionManager.subscribe(envelope.contentTopic).isOkOr:
-      warn "Failed to auto-subscribe", error = error
-      return err("Failed to auto-subscribe before sending: " & error)
-
-  let requestId = RequestId.new(self.node.rng)
-
-  let deliveryTask = DeliveryTask.new(requestId, envelope, self.node.brokerCtx).valueOr:
-    return err("MessagingClient.send: Failed to create delivery task: " & error)
-
-  asyncSpawn self.sendService.send(deliveryTask)
-
-  return ok(requestId)
+  return ok()

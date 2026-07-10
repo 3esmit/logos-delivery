@@ -116,7 +116,7 @@ type WakuConfBuilder* = object
   filterServiceConf*: FilterServiceConfBuilder
   metricsServerConf*: MetricsServerConfBuilder
   restServerConf*: RestServerConfBuilder
-  rlnRelayConf*: RlnRelayConfBuilder
+  rlnRelayConf*: RlnConfBuilder
   storeServiceConf*: StoreServiceConfBuilder
   mixConf*: MixConfBuilder
   webSocketConf*: WebSocketConfBuilder
@@ -170,7 +170,6 @@ type WakuConfBuilder* = object
   relayShardedPeerManagement: Option[bool]
   relayServiceRatio: Option[string]
   circuitRelayClient: Option[bool]
-  p2pReliability: Option[bool]
 
   localStoragePath: Option[string]
 
@@ -181,7 +180,7 @@ proc init*(T: type WakuConfBuilder): WakuConfBuilder =
     filterServiceConf: FilterServiceConfBuilder.init(),
     metricsServerConf: MetricsServerConfBuilder.init(),
     restServerConf: RestServerConfBuilder.init(),
-    rlnRelayConf: RlnRelayConfBuilder.init(),
+    rlnRelayConf: RlnConfBuilder.init(),
     storeServiceConf: StoreServiceConfBuilder.init(),
     webSocketConf: WebSocketConfBuilder.init(),
     quicConf: QuicConfBuilder.init(),
@@ -309,9 +308,6 @@ proc withRelayShardedPeerManagement*(
     b: var WakuConfBuilder, relayShardedPeerManagement: bool
 ) =
   b.relayShardedPeerManagement = some(relayShardedPeerManagement)
-
-proc withP2pReliability*(b: var WakuConfBuilder, p2pReliability: bool) =
-  b.p2pReliability = some(p2pReliability)
 
 proc withLocalStoragePath*(b: var WakuConfBuilder, localStoragePath: string) =
   b.localStoragePath = some(localStoragePath)
@@ -462,10 +458,6 @@ proc applyNetworkPresetConf(builder: var WakuConfBuilder) =
   checkSetPresetValueToField(
     builder.mix, networkPresetConf.mix, "Mix was provided alongside a network conf"
   )
-  checkSetPresetValueToField(
-    builder.p2pReliability, networkPresetConf.p2pReliability,
-    "P2P Reliability was provided alongside a network conf",
-  )
 
   # Process entry nodes from network config - classify and distribute
   if networkPresetConf.entryNodes.len > 0:
@@ -528,6 +520,13 @@ proc enforceSecurityConstraints(builder: WakuConfBuilder): Result[void, string] 
       )
 
   ok()
+
+func resolvePortsShift(configured: Port, portsShift: uint16): Port =
+  ## Fold portsShift into a configured port. Port(0) (auto-assign) is left as-is.
+  if configured == Port(0):
+    configured
+  else:
+    Port(configured.uint16 + portsShift)
 
 proc build*(
     builder: var WakuConfBuilder, rng: crypto.Rng = crypto.newRng()
@@ -624,7 +623,7 @@ proc build*(
   let contentTopics = builder.contentTopics.get(@[])
 
   # Build sub-configs
-  let discv5Conf = builder.discv5Conf.build().valueOr:
+  var discv5Conf = builder.discv5Conf.build().valueOr:
     return err("Discv5 Conf building failed: " & $error)
 
   let dnsDiscoveryConf = builder.dnsDiscoveryConf.build().valueOr:
@@ -633,10 +632,10 @@ proc build*(
   let filterServiceConf = builder.filterServiceConf.build().valueOr:
     return err("Filter Service Conf building failed: " & $error)
 
-  let metricsServerConf = builder.metricsServerConf.build().valueOr:
+  var metricsServerConf = builder.metricsServerConf.build().valueOr:
     return err("Metrics Server Conf building failed: " & $error)
 
-  let restServerConf = builder.restServerConf.build().valueOr:
+  var restServerConf = builder.restServerConf.build().valueOr:
     return err("REST Server Conf building failed: " & $error)
 
   let rlnRelayConf = builder.rlnRelayConf.build().valueOr:
@@ -648,10 +647,10 @@ proc build*(
   let mixConf = builder.mixConf.build().valueOr:
     return err("Mix Conf building failed: " & $error)
 
-  let webSocketConf = builder.webSocketConf.build().valueOr:
+  var webSocketConf = builder.webSocketConf.build().valueOr:
     return err("WebSocket Conf building failed: " & $error)
 
-  let quicConf = builder.quicConf.build().valueOr:
+  var quicConf = builder.quicConf.build().valueOr:
     return err("QUIC Conf building failed: " & $error)
 
   let rateLimit = builder.rateLimitConf.build().valueOr:
@@ -683,7 +682,7 @@ proc build*(
       warn "Nat Strategy is not specified, defaulting to none"
       DefaultNatStrategy
 
-  let p2pTcpPort = builder.p2pTcpPort.get(DefaultP2pTcpPort)
+  var p2pTcpPort = builder.p2pTcpPort.get(DefaultP2pTcpPort)
 
   let p2pListenAddress =
     if builder.p2pListenAddress.isSome():
@@ -765,6 +764,20 @@ proc build*(
     mix = mix,
   )
 
+  # portsShift is consumed here, WakuConf carries final bind ports.
+  p2pTcpPort = resolvePortsShift(p2pTcpPort, portsShift)
+  if webSocketConf.isSome():
+    webSocketConf.get().port = resolvePortsShift(webSocketConf.get().port, portsShift)
+  if quicConf.isSome():
+    quicConf.get().port = resolvePortsShift(quicConf.get().port, portsShift)
+  if discv5Conf.isSome():
+    discv5Conf.get().udpPort = resolvePortsShift(discv5Conf.get().udpPort, portsShift)
+  if restServerConf.isSome():
+    restServerConf.get().port = resolvePortsShift(restServerConf.get().port, portsShift)
+  if metricsServerConf.isSome():
+    metricsServerConf.get().httpPort =
+      resolvePortsShift(metricsServerConf.get().httpPort, portsShift)
+
   let wakuConf = WakuConf(
     # confs
     storeServiceConf: storeServiceConf,
@@ -784,7 +797,7 @@ proc build*(
     subscribeShards: subscribeShards,
     protectedShards: protectedShards,
     relay: relay,
-    lightPush: lightPush,
+    lightPush: lightPush and relay, # can't mount lightpush without relay
     peerExchangeService: peerExchange,
     rendezvous: rendezvous,
     peerExchangeDiscovery: true,
@@ -806,7 +819,6 @@ proc build*(
       extMultiAddrs: extMultiAddrs,
       extMultiAddrsOnly: extMultiAddrsOnly,
     ),
-    portsShift: portsShift,
     webSocketConf: webSocketConf,
     quicConf: quicConf,
     dnsAddrsNameServers: dnsAddrsNameServers,
@@ -821,7 +833,6 @@ proc build*(
     circuitRelayClient: builder.circuitRelayClient.get(DefaultCircuitRelayClient),
     staticNodes: builder.staticNodes,
     relayShardedPeerManagement: relayShardedPeerManagement,
-    p2pReliability: builder.p2pReliability.get(DefaultP2pReliability),
     wakuFlags: wakuFlags,
     localStoragePath: builder.localStoragePath.get(DefaultStoragePath),
   )

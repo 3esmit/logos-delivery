@@ -240,11 +240,11 @@ actor WakuActor {
             print("[WakuActor] Unsubscribed from filter")
 
             // Stop
-            _ = await self.callWakuSync { waku_stop(ctxToStop, WakuActor.syncCallback, $0) }
+            _ = await self.callWakuSync { logosdelivery_stop_node(ctxToStop, WakuActor.syncCallback, $0) }
             print("[WakuActor] Node stopped")
 
             // Destroy
-            _ = await self.callWakuSync { waku_destroy(ctxToStop, WakuActor.syncCallback, $0) }
+            _ = await self.callWakuSync { logosdelivery_destroy(ctxToStop, WakuActor.syncCallback, $0) }
             print("[WakuActor] Node destroyed")
         }
     }
@@ -300,32 +300,27 @@ actor WakuActor {
     private func initializeNode() async -> Bool {
         let config = """
         {
-            "tcpPort": 60000,
-            "clusterId": 1,
-            "shards": [0],
-            "relay": false,
-            "lightpush": true,
-            "filter": true,
-            "logLevel": "DEBUG",
-            "discv5Discovery": true,
-            "discv5BootstrapNodes": [
-                "enr:-QESuEB4Dchgjn7gfAvwB00CxTA-nGiyk-aALI-H4dYSZD3rUk7bZHmP8d2U6xDiQ2vZffpo45Jp7zKNdnwDUx6g4o6XAYJpZIJ2NIJpcIRA4VDAim11bHRpYWRkcnO4XAArNiZub2RlLTAxLmRvLWFtczMud2FrdS5zYW5kYm94LnN0YXR1cy5pbQZ2XwAtNiZub2RlLTAxLmRvLWFtczMud2FrdS5zYW5kYm94LnN0YXR1cy5pbQYfQN4DgnJzkwABCAAAAAEAAgADAAQABQAGAAeJc2VjcDI1NmsxoQOvD3S3jUNICsrOILlmhENiWAMmMVlAl6-Q8wRB7hidY4N0Y3CCdl-DdWRwgiMohXdha3UyDw",
-                "enr:-QEkuEBIkb8q8_mrorHndoXH9t5N6ZfD-jehQCrYeoJDPHqT0l0wyaONa2-piRQsi3oVKAzDShDVeoQhy0uwN1xbZfPZAYJpZIJ2NIJpcIQiQlleim11bHRpYWRkcnO4bgA0Ni9ub2RlLTAxLmdjLXVzLWNlbnRyYWwxLWEud2FrdS5zYW5kYm94LnN0YXR1cy5pbQZ2XwA2Ni9ub2RlLTAxLmdjLXVzLWNlbnRyYWwxLWEud2FrdS5zYW5kYm94LnN0YXR1cy5pbQYfQN4DgnJzkwABCAAAAAEAAgADAAQABQAGAAeJc2VjcDI1NmsxoQKnGt-GSgqPSf3IAPM7bFgTlpczpMZZLF3geeoNNsxzSoN0Y3CCdl-DdWRwgiMohXdha3UyDw"
-            ],
-            "discv5UdpPort": 9999,
-            "dnsDiscovery": true,
-            "dnsDiscoveryUrl": "enrtree://AOGYWMBYOUIMOENHXCHILPKY3ZRFEULMFI4DOM442QSZ73TT2A7VI@test.waku.nodes.status.im",
-            "dnsDiscoveryNameServers": ["8.8.8.8", "1.0.0.1"]
+            "mode": "Edge",
+            "messagingOverrides": {
+                "tcp-port": 60000,
+                "cluster-id": 1,
+                "log-level": "DEBUG",
+                "entry-node": [
+                    "enr:-QESuEB4Dchgjn7gfAvwB00CxTA-nGiyk-aALI-H4dYSZD3rUk7bZHmP8d2U6xDiQ2vZffpo45Jp7zKNdnwDUx6g4o6XAYJpZIJ2NIJpcIRA4VDAim11bHRpYWRkcnO4XAArNiZub2RlLTAxLmRvLWFtczMud2FrdS5zYW5kYm94LnN0YXR1cy5pbQZ2XwAtNiZub2RlLTAxLmRvLWFtczMud2FrdS5zYW5kYm94LnN0YXR1cy5pbQYfQN4DgnJzkwABCAAAAAEAAgADAAQABQAGAAeJc2VjcDI1NmsxoQOvD3S3jUNICsrOILlmhENiWAMmMVlAl6-Q8wRB7hidY4N0Y3CCdl-DdWRwgiMohXdha3UyDw",
+                    "enr:-QEkuEBIkb8q8_mrorHndoXH9t5N6ZfD-jehQCrYeoJDPHqT0l0wyaONa2-piRQsi3oVKAzDShDVeoQhy0uwN1xbZfPZAYJpZIJ2NIJpcIQiQlleim11bHRpYWRkcnO4bgA0Ni9ub2RlLTAxLmdjLXVzLWNlbnRyYWwxLWEud2FrdS5zYW5kYm94LnN0YXR1cy5pbQZ2XwA2Ni9ub2RlLTAxLmdjLXVzLWNlbnRyYWwxLWEud2FrdS5zYW5kYm94LnN0YXR1cy5pbQYfQN4DgnJzkwABCAAAAAEAAgADAAQABQAGAAeJc2VjcDI1NmsxoQKnGt-GSgqPSf3IAPM7bFgTlpczpMZZLF3geeoNNsxzSoN0Y3CCdl-DdWRwgiMohXdha3UyDw"
+                ],
+                "discv5-udp-port": 9999
+            }
         }
         """
 
-        // Create node - waku_new is special, it returns the context directly
+        // Create node - logosdelivery_create_node is special, it returns the context directly
         let createResult = await withCheckedContinuation { (continuation: CheckedContinuation<(ctx: UnsafeMutableRawPointer?, success: Bool, result: String?), Never>) in
             let callbackCtx = CallbackContext()
             let userDataPtr = Unmanaged.passRetained(callbackCtx).toOpaque()
 
-            // Set up a simple callback for waku_new
-            let newCtx = waku_new(config, { ret, msg, len, userData in
+            // Set up a simple callback for logosdelivery_create_node
+            let newCtx = logosdelivery_create_node(config, { ret, msg, len, userData in
                 guard let userData = userData else { return }
                 let context = Unmanaged<CallbackContext>.fromOpaque(userData).takeUnretainedValue()
                 context.success = (ret == RET_OK)
@@ -354,7 +349,7 @@ actor WakuActor {
 
         // Start node
         let startResult = await callWakuSync { userData in
-            waku_start(self.ctx, WakuActor.syncCallback, userData)
+            logosdelivery_start_node(self.ctx, WakuActor.syncCallback, userData)
         }
 
         guard startResult.success else {

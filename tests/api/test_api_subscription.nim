@@ -12,13 +12,13 @@ import
   logos_delivery/waku/[
     waku_node,
     waku_core,
-    events/message_events,
     waku_relay/protocol,
     node/waku_node/filter,
     node/subscription_manager,
   ]
 import logos_delivery/waku/factory/waku_conf
 import tools/confutils/cli_args
+import logos_delivery/api/conf/messaging_conf
 
 const TestTimeout = chronos.seconds(10)
 const NegativeTestTimeout = chronos.seconds(2)
@@ -64,46 +64,44 @@ proc waitForEvents(
 type TestNetwork = ref object
   publisher: WakuNode # Relay node that publishes messages in tests.
   meshBuddy: WakuNode # Extra relay peer for publisher's mesh (Edge tests only).
-  subscriber: Waku
+  subscriber: LogosDelivery
     # The receiver node in tests. Edge node in edge tests, Core node in relay tests.
   publisherPeerInfo: RemotePeerInfo
 
 proc createApiNodeConf(
-    mode: cli_args.WakuMode = cli_args.WakuMode.Core, numShards: uint16 = 1
+    mode: messaging_conf.LogosDeliveryMode = messaging_conf.LogosDeliveryMode.Core,
+    numShards: uint16 = 1,
 ): WakuNodeConf =
-  var conf = defaultWakuNodeConf().valueOr:
-    raiseAssert error
-  conf.mode = mode
+  var conf = MessagingClientConf().toWakuNodeConf(mode).valueOr:
+      raiseAssert error
   conf.listenAddress = parseIpAddress("0.0.0.0")
   conf.tcpPort = Port(0)
   conf.discv5UdpPort = Port(0)
   conf.clusterId = some(3'u16)
   conf.numShardsInNetwork = numShards
-  conf.reliabilityEnabled = some(true)
   conf.rest = false
   result = conf
 
-proc setupSubscriberNode(conf: WakuNodeConf): Future[Waku] {.async.} =
-  var node: Waku
+proc setupSubscriberNode(conf: WakuNodeConf): Future[LogosDelivery] {.async.} =
+  var node: LogosDelivery
   lockNewGlobalBrokerContext:
-    node = (await createNode(conf)).expect("Failed to create subscriber node")
-    node.mountMessagingClient().expect("Failed to mount messaging")
+    node = (await LogosDelivery.new(conf)).expect("Failed to create subscriber node")
     (await node.start()).expect("Failed to start subscriber node")
   return node
 
 proc setupNetwork(
-    numShards: uint16 = 1, mode: cli_args.WakuMode = cli_args.WakuMode.Core
+    numShards: uint16 = 1,
+    mode: messaging_conf.LogosDeliveryMode = messaging_conf.LogosDeliveryMode.Core,
 ): Future[TestNetwork] {.async.} =
   var net = TestNetwork()
 
   lockNewGlobalBrokerContext:
-    net.publisher =
-      newTestWakuNode(generateSecp256k1Key(), parseIpAddress("0.0.0.0"), Port(0))
+    net.publisher = newTestWakuNode(generateSecp256k1Key())
     net.publisher.mountMetadata(3, toSeq(0'u16 ..< numShards)).expect(
       "Failed to mount metadata"
     )
     (await net.publisher.mountRelay()).expect("Failed to mount relay")
-    if mode == cli_args.WakuMode.Edge:
+    if mode == messaging_conf.LogosDeliveryMode.Edge:
       await net.publisher.mountFilter()
     await net.publisher.mountLibp2pPing()
     await net.publisher.start()
@@ -122,10 +120,9 @@ proc setupNetwork(
       "Failed to sub publisher"
     )
 
-  if mode == cli_args.WakuMode.Edge:
+  if mode == messaging_conf.LogosDeliveryMode.Edge:
     lockNewGlobalBrokerContext:
-      net.meshBuddy =
-        newTestWakuNode(generateSecp256k1Key(), parseIpAddress("0.0.0.0"), Port(0))
+      net.meshBuddy = newTestWakuNode(generateSecp256k1Key())
       net.meshBuddy.mountMetadata(3, toSeq(0'u16 ..< numShards)).expect(
         "Failed to mount metadata on meshBuddy"
       )
@@ -141,7 +138,7 @@ proc setupNetwork(
 
   net.subscriber = await setupSubscriberNode(createApiNodeConf(mode, numShards))
 
-  await net.subscriber.node.connectToNodes(@[net.publisherPeerInfo])
+  await net.subscriber.waku.node.connectToNodes(@[net.publisherPeerInfo])
 
   return net
 
@@ -171,28 +168,30 @@ proc waitForMesh(node: WakuNode, shard: PubsubTopic) {.async.} =
     await sleepAsync(100.milliseconds)
   raise newException(ValueError, "GossipSub Mesh failed to stabilize on " & shard)
 
-proc waitForEdgeSubs(w: Waku, shard: PubsubTopic) {.async.} =
+proc waitForEdgeSubs(w: LogosDelivery, shard: PubsubTopic) {.async.} =
   let deadline = Moment.now() + EdgeWaitTimeout
   while Moment.now() < deadline:
-    if w.node.subscriptionManager.edgeFilterPeerCount(shard) > 0:
+    if w.waku.node.subscriptionManager.edgeFilterPeerCount(shard) > 0:
       return
     await sleepAsync(100.milliseconds)
   raise newException(ValueError, "Edge filter subscription failed on " & shard)
 
-proc edgePeersReached(w: Waku, shard: PubsubTopic, n: int): Future[bool] {.async.} =
+proc edgePeersReached(
+    w: LogosDelivery, shard: PubsubTopic, n: int
+): Future[bool] {.async.} =
   let deadline = Moment.now() + EdgeWaitTimeout
   while Moment.now() < deadline:
-    if w.node.subscriptionManager.edgeFilterPeerCount(shard) >= n:
+    if w.waku.node.subscriptionManager.edgeFilterPeerCount(shard) >= n:
       return true
     await sleepAsync(100.milliseconds)
   return false
 
 proc edgePeersDroppedBelow(
-    w: Waku, shard: PubsubTopic, n: int
+    w: LogosDelivery, shard: PubsubTopic, n: int
 ): Future[bool] {.async.} =
   let deadline = Moment.now() + EdgeWaitTimeout
   while Moment.now() < deadline:
-    if w.node.subscriptionManager.edgeFilterPeerCount(shard) < n:
+    if w.waku.node.subscriptionManager.edgeFilterPeerCount(shard) < n:
       return true
     await sleepAsync(100.milliseconds)
   return false
@@ -201,7 +200,7 @@ proc publishToMesh(
     net: TestNetwork, contentTopic: ContentTopic, payload: seq[byte]
 ): Future[Result[int, string]] {.async.} =
   # Publishes a message from "publisher" via relay into the gossipsub mesh.
-  let shard = net.subscriber.node.getRelayShard(contentTopic)
+  let shard = net.subscriber.waku.node.getRelayShard(contentTopic)
   await waitForMesh(net.publisher, shard)
   let msg = WakuMessage(
     payload: payload, contentTopic: contentTopic, version: 0, timestamp: now()
@@ -213,7 +212,7 @@ proc publishToMeshAfterEdgeReady(
 ): Future[Result[int, string]] {.async.} =
   # First, ensure "subscriber" node (an edge node) is subscribed and ready to receive.
   # Afterwards, "publisher" (relay node) sends the message in the gossipsub network.
-  let shard = net.subscriber.node.getRelayShard(contentTopic)
+  let shard = net.subscriber.waku.node.getRelayShard(contentTopic)
   await waitForEdgeSubs(net.subscriber, shard)
   return await net.publishToMesh(contentTopic, payload)
 
@@ -224,11 +223,11 @@ suite "Messaging API, SubscriptionManager":
       await net.teardown()
 
     let testTopic = ContentTopic("/waku/2/test-content/proto")
-    (await net.subscriber.subscribe(testTopic)).expect(
+    (await net.subscriber.messagingClient.subscribe(testTopic)).expect(
       "subscriberNode failed to subscribe"
     )
 
-    let eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    let eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
     defer:
       await eventManager.teardown()
 
@@ -247,9 +246,11 @@ suite "Messaging API, SubscriptionManager":
 
     let subbedTopic = ContentTopic("/waku/2/subbed-topic/proto")
     let ignoredTopic = ContentTopic("/waku/2/ignored-topic/proto")
-    (await net.subscriber.subscribe(subbedTopic)).expect("failed to subscribe")
+    (await net.subscriber.messagingClient.subscribe(subbedTopic)).expect(
+      "failed to subscribe"
+    )
 
-    let eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    let eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
     defer:
       await eventManager.teardown()
 
@@ -267,10 +268,14 @@ suite "Messaging API, SubscriptionManager":
 
     let testTopic = ContentTopic("/waku/2/unsub-test/proto")
 
-    (await net.subscriber.subscribe(testTopic)).expect("failed to subscribe")
-    net.subscriber.unsubscribe(testTopic).expect("failed to unsubscribe")
+    (await net.subscriber.messagingClient.subscribe(testTopic)).expect(
+      "failed to subscribe"
+    )
+    net.subscriber.messagingClient.unsubscribe(testTopic).expect(
+      "failed to unsubscribe"
+    )
 
-    let eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    let eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
     defer:
       await eventManager.teardown()
 
@@ -288,14 +293,14 @@ suite "Messaging API, SubscriptionManager":
 
     let topicA = ContentTopic("/waku/2/topic-a/proto")
     let topicB = ContentTopic("/waku/2/topic-b/proto")
-    (await net.subscriber.subscribe(topicA)).expect("failed to sub A")
-    (await net.subscriber.subscribe(topicB)).expect("failed to sub B")
+    (await net.subscriber.messagingClient.subscribe(topicA)).expect("failed to sub A")
+    (await net.subscriber.messagingClient.subscribe(topicB)).expect("failed to sub B")
 
-    let eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    let eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
     defer:
       await eventManager.teardown()
 
-    net.subscriber.unsubscribe(topicA).expect("failed to unsub A")
+    net.subscriber.messagingClient.unsubscribe(topicA).expect("failed to unsub A")
 
     discard (await net.publishToMesh(topicA, "Dropped Message".toBytes())).expect(
       "Publish A failed"
@@ -314,11 +319,15 @@ suite "Messaging API, SubscriptionManager":
 
     let glitchTopic = ContentTopic("/waku/2/glitch/proto")
 
-    (await net.subscriber.subscribe(glitchTopic)).expect("failed to sub")
-    (await net.subscriber.subscribe(glitchTopic)).expect("failed to double sub")
-    net.subscriber.unsubscribe(glitchTopic).expect("failed to unsub")
+    (await net.subscriber.messagingClient.subscribe(glitchTopic)).expect(
+      "failed to sub"
+    )
+    (await net.subscriber.messagingClient.subscribe(glitchTopic)).expect(
+      "failed to double sub"
+    )
+    net.subscriber.messagingClient.unsubscribe(glitchTopic).expect("failed to unsub")
 
-    let eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    let eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
     defer:
       await eventManager.teardown()
 
@@ -337,9 +346,11 @@ suite "Messaging API, SubscriptionManager":
     let testTopic = ContentTopic("/waku/2/resub-test/proto")
 
     # Subscribe
-    (await net.subscriber.subscribe(testTopic)).expect("Initial sub failed")
+    (await net.subscriber.messagingClient.subscribe(testTopic)).expect(
+      "Initial sub failed"
+    )
 
-    var eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    var eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
     discard
       (await net.publishToMesh(testTopic, "Msg 1".toBytes())).expect("Pub 1 failed")
 
@@ -347,8 +358,8 @@ suite "Messaging API, SubscriptionManager":
     await eventManager.teardown()
 
     # Unsubscribe and verify teardown
-    net.subscriber.unsubscribe(testTopic).expect("Unsub failed")
-    eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    net.subscriber.messagingClient.unsubscribe(testTopic).expect("Unsub failed")
+    eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
 
     discard
       (await net.publishToMesh(testTopic, "Ghost".toBytes())).expect("Ghost pub failed")
@@ -357,8 +368,8 @@ suite "Messaging API, SubscriptionManager":
     await eventManager.teardown()
 
     # Resubscribe
-    (await net.subscriber.subscribe(testTopic)).expect("Resub failed")
-    eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    (await net.subscriber.messagingClient.subscribe(testTopic)).expect("Resub failed")
+    eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
 
     discard
       (await net.publishToMesh(testTopic, "Msg 2".toBytes())).expect("Pub 2 failed")
@@ -376,15 +387,15 @@ suite "Messaging API, SubscriptionManager":
 
     # generate two content topics that land in two different shards
     var i = 0
-    while net.subscriber.node.getRelayShard(topicA) ==
-        net.subscriber.node.getRelayShard(topicB):
+    while net.subscriber.waku.node.getRelayShard(topicA) ==
+        net.subscriber.waku.node.getRelayShard(topicB):
       topicB = ContentTopic("/appB" & $i & "/2/shard-test-b/proto")
       inc i
 
-    (await net.subscriber.subscribe(topicA)).expect("failed to sub A")
-    (await net.subscriber.subscribe(topicB)).expect("failed to sub B")
+    (await net.subscriber.messagingClient.subscribe(topicA)).expect("failed to sub A")
+    (await net.subscriber.messagingClient.subscribe(topicB)).expect("failed to sub B")
 
-    let eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 2)
+    let eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 2)
     defer:
       await eventManager.teardown()
 
@@ -411,7 +422,7 @@ suite "Messaging API, SubscriptionManager":
 
     proc verifyNetworkState(expected: seq[ContentTopic]) {.async.} =
       let eventManager =
-        newReceiveEventListenerManager(net.subscriber.brokerCtx, expected.len)
+        newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, expected.len)
 
       for topic in allTopics:
         discard (await net.publishToMesh(topic, "Stress Payload".toBytes())).expect(
@@ -439,7 +450,7 @@ suite "Messaging API, SubscriptionManager":
 
     # subscribe to all content topics we generated
     for t in allTopics:
-      (await net.subscriber.subscribe(t)).expect("sub failed")
+      (await net.subscriber.messagingClient.subscribe(t)).expect("sub failed")
       activeSubs.add(t)
 
     await verifyNetworkState(activeSubs)
@@ -447,7 +458,7 @@ suite "Messaging API, SubscriptionManager":
     # unsubscribe from some content topics
     for i in 0 ..< 50:
       let t = allTopics[i]
-      net.subscriber.unsubscribe(t).expect("unsub failed")
+      net.subscriber.messagingClient.unsubscribe(t).expect("unsub failed")
 
       let idx = activeSubs.find(t)
       if idx >= 0:
@@ -458,20 +469,22 @@ suite "Messaging API, SubscriptionManager":
     # re-subscribe to some content topics
     for i in 0 ..< 25:
       let t = allTopics[i]
-      (await net.subscriber.subscribe(t)).expect("resub failed")
+      (await net.subscriber.messagingClient.subscribe(t)).expect("resub failed")
       activeSubs.add(t)
 
     await verifyNetworkState(activeSubs)
 
   asyncTest "Subscription API, edge node subscribe and receive message":
-    let net = await setupNetwork(1, cli_args.WakuMode.Edge)
+    let net = await setupNetwork(1, messaging_conf.LogosDeliveryMode.Edge)
     defer:
       await net.teardown()
 
     let testTopic = ContentTopic("/waku/2/test-content/proto")
-    (await net.subscriber.subscribe(testTopic)).expect("failed to subscribe")
+    (await net.subscriber.messagingClient.subscribe(testTopic)).expect(
+      "failed to subscribe"
+    )
 
-    let eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    let eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
     defer:
       await eventManager.teardown()
 
@@ -484,15 +497,17 @@ suite "Messaging API, SubscriptionManager":
     check eventManager.receivedMessages[0].contentTopic == testTopic
 
   asyncTest "Subscription API, edge node ignores unsubscribed content topics":
-    let net = await setupNetwork(1, cli_args.WakuMode.Edge)
+    let net = await setupNetwork(1, messaging_conf.LogosDeliveryMode.Edge)
     defer:
       await net.teardown()
 
     let subbedTopic = ContentTopic("/waku/2/subbed-topic/proto")
     let ignoredTopic = ContentTopic("/waku/2/ignored-topic/proto")
-    (await net.subscriber.subscribe(subbedTopic)).expect("failed to subscribe")
+    (await net.subscriber.messagingClient.subscribe(subbedTopic)).expect(
+      "failed to subscribe"
+    )
 
-    let eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    let eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
     defer:
       await eventManager.teardown()
 
@@ -504,16 +519,20 @@ suite "Messaging API, SubscriptionManager":
     check eventManager.receivedMessages.len == 0
 
   asyncTest "Subscription API, edge node unsubscribe stops message receipt":
-    let net = await setupNetwork(1, cli_args.WakuMode.Edge)
+    let net = await setupNetwork(1, messaging_conf.LogosDeliveryMode.Edge)
     defer:
       await net.teardown()
 
     let testTopic = ContentTopic("/waku/2/unsub-test/proto")
 
-    (await net.subscriber.subscribe(testTopic)).expect("failed to subscribe")
-    net.subscriber.unsubscribe(testTopic).expect("failed to unsubscribe")
+    (await net.subscriber.messagingClient.subscribe(testTopic)).expect(
+      "failed to subscribe"
+    )
+    net.subscriber.messagingClient.unsubscribe(testTopic).expect(
+      "failed to unsubscribe"
+    )
 
-    let eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    let eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
     defer:
       await eventManager.teardown()
 
@@ -525,23 +544,23 @@ suite "Messaging API, SubscriptionManager":
     check eventManager.receivedMessages.len == 0
 
   asyncTest "Subscription API, edge node overlapping topics isolation":
-    let net = await setupNetwork(1, cli_args.WakuMode.Edge)
+    let net = await setupNetwork(1, messaging_conf.LogosDeliveryMode.Edge)
     defer:
       await net.teardown()
 
     let topicA = ContentTopic("/waku/2/topic-a/proto")
     let topicB = ContentTopic("/waku/2/topic-b/proto")
-    (await net.subscriber.subscribe(topicA)).expect("failed to sub A")
-    (await net.subscriber.subscribe(topicB)).expect("failed to sub B")
+    (await net.subscriber.messagingClient.subscribe(topicA)).expect("failed to sub A")
+    (await net.subscriber.messagingClient.subscribe(topicB)).expect("failed to sub B")
 
-    let shard = net.subscriber.node.getRelayShard(topicA)
+    let shard = net.subscriber.waku.node.getRelayShard(topicA)
     await waitForEdgeSubs(net.subscriber, shard)
 
-    let eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    let eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
     defer:
       await eventManager.teardown()
 
-    net.subscriber.unsubscribe(topicA).expect("failed to unsub A")
+    net.subscriber.messagingClient.unsubscribe(topicA).expect("failed to unsub A")
 
     discard (await net.publishToMesh(topicA, "Dropped Message".toBytes())).expect(
       "Publish A failed"
@@ -554,15 +573,17 @@ suite "Messaging API, SubscriptionManager":
     check eventManager.receivedMessages[0].contentTopic == topicB
 
   asyncTest "Subscription API, edge node resubscribe after unsubscribe":
-    let net = await setupNetwork(1, cli_args.WakuMode.Edge)
+    let net = await setupNetwork(1, messaging_conf.LogosDeliveryMode.Edge)
     defer:
       await net.teardown()
 
     let testTopic = ContentTopic("/waku/2/resub-test/proto")
 
-    (await net.subscriber.subscribe(testTopic)).expect("Initial sub failed")
+    (await net.subscriber.messagingClient.subscribe(testTopic)).expect(
+      "Initial sub failed"
+    )
 
-    var eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    var eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
     discard (await net.publishToMeshAfterEdgeReady(testTopic, "Msg 1".toBytes())).expect(
       "Pub 1 failed"
     )
@@ -570,8 +591,8 @@ suite "Messaging API, SubscriptionManager":
     require await eventManager.waitForEvents(TestTimeout)
     await eventManager.teardown()
 
-    net.subscriber.unsubscribe(testTopic).expect("Unsub failed")
-    eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    net.subscriber.messagingClient.unsubscribe(testTopic).expect("Unsub failed")
+    eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
 
     discard
       (await net.publishToMesh(testTopic, "Ghost".toBytes())).expect("Ghost pub failed")
@@ -579,8 +600,8 @@ suite "Messaging API, SubscriptionManager":
     check not await eventManager.waitForEvents(NegativeTestTimeout)
     await eventManager.teardown()
 
-    (await net.subscriber.subscribe(testTopic)).expect("Resub failed")
-    eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    (await net.subscriber.messagingClient.subscribe(testTopic)).expect("Resub failed")
+    eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
 
     discard (await net.publishToMeshAfterEdgeReady(testTopic, "Msg 2".toBytes())).expect(
       "Pub 2 failed"
@@ -601,8 +622,7 @@ suite "Messaging API, SubscriptionManager":
 
     var publisher: WakuNode
     lockNewGlobalBrokerContext:
-      publisher =
-        newTestWakuNode(generateSecp256k1Key(), parseIpAddress("0.0.0.0"), Port(0))
+      publisher = newTestWakuNode(generateSecp256k1Key())
       publisher.mountMetadata(3, toSeq(0'u16 ..< numShards)).expect(
         "Failed to mount metadata on publisher"
       )
@@ -620,8 +640,7 @@ suite "Messaging API, SubscriptionManager":
 
     var meshBuddy: WakuNode
     lockNewGlobalBrokerContext:
-      meshBuddy =
-        newTestWakuNode(generateSecp256k1Key(), parseIpAddress("0.0.0.0"), Port(0))
+      meshBuddy = newTestWakuNode(generateSecp256k1Key())
       meshBuddy.mountMetadata(3, toSeq(0'u16 ..< numShards)).expect(
         "Failed to mount metadata on meshBuddy"
       )
@@ -639,20 +658,22 @@ suite "Messaging API, SubscriptionManager":
 
     await meshBuddy.connectToNodes(@[publisherPeerInfo])
 
-    let conf = createApiNodeConf(cli_args.WakuMode.Edge, numShards)
-    var subscriber: Waku
+    let conf = createApiNodeConf(messaging_conf.LogosDeliveryMode.Edge, numShards)
+    var subscriber: LogosDelivery
     lockNewGlobalBrokerContext:
-      subscriber = (await createNode(conf)).expect("Failed to create edge subscriber")
-      subscriber.mountMessagingClient().expect("Failed to mount messaging")
+      subscriber =
+        (await LogosDelivery.new(conf)).expect("Failed to create edge subscriber")
       (await subscriber.start()).expect("Failed to start edge subscriber")
 
     # Connect edge subscriber to both filter servers so selectPeers finds both
-    await subscriber.node.connectToNodes(@[publisherPeerInfo, meshBuddyPeerInfo])
+    await subscriber.waku.node.connectToNodes(@[publisherPeerInfo, meshBuddyPeerInfo])
 
     let testTopic = ContentTopic("/waku/2/failover-test/proto")
-    let shard = subscriber.node.getRelayShard(testTopic)
+    let shard = subscriber.waku.node.getRelayShard(testTopic)
 
-    (await subscriber.subscribe(testTopic)).expect("Failed to subscribe")
+    (await subscriber.messagingClient.subscribe(testTopic)).expect(
+      "Failed to subscribe"
+    )
 
     # Wait for dialing both filter servers (HealthyThreshold = 2)
     check await edgePeersReached(subscriber, shard, 2)
@@ -660,7 +681,7 @@ suite "Messaging API, SubscriptionManager":
     # Verify message delivery with both servers alive
     await waitForMesh(publisher, shard)
 
-    var eventManager = newReceiveEventListenerManager(subscriber.brokerCtx, 1)
+    var eventManager = newReceiveEventListenerManager(subscriber.waku.brokerCtx, 1)
     let msg1 = WakuMessage(
       payload: "Before failover".toBytes(),
       contentTopic: testTopic,
@@ -674,14 +695,14 @@ suite "Messaging API, SubscriptionManager":
     await eventManager.teardown()
 
     # Disconnect meshBuddy from edge (keeps relay mesh alive for publishing)
-    await subscriber.node.disconnectNode(meshBuddyPeerInfo)
+    await subscriber.waku.node.disconnectNode(meshBuddyPeerInfo)
 
     # Wait for the dead peer to be pruned
     check await edgePeersDroppedBelow(subscriber, shard, 2)
-    check subscriber.node.subscriptionManager.edgeFilterPeerCount(shard) >= 1
+    check subscriber.waku.node.subscriptionManager.edgeFilterPeerCount(shard) >= 1
 
     # Verify messages still arrive through the surviving filter server (publisher)
-    eventManager = newReceiveEventListenerManager(subscriber.brokerCtx, 1)
+    eventManager = newReceiveEventListenerManager(subscriber.waku.brokerCtx, 1)
     let msg2 = WakuMessage(
       payload: "After failover".toBytes(),
       contentTopic: testTopic,
@@ -710,8 +731,7 @@ suite "Messaging API, SubscriptionManager":
 
     var publisher: WakuNode
     lockNewGlobalBrokerContext:
-      publisher =
-        newTestWakuNode(generateSecp256k1Key(), parseIpAddress("0.0.0.0"), Port(0))
+      publisher = newTestWakuNode(generateSecp256k1Key())
       publisher.mountMetadata(3, toSeq(0'u16 ..< numShards)).expect(
         "Failed to mount metadata on publisher"
       )
@@ -729,8 +749,7 @@ suite "Messaging API, SubscriptionManager":
 
     var meshBuddy: WakuNode
     lockNewGlobalBrokerContext:
-      meshBuddy =
-        newTestWakuNode(generateSecp256k1Key(), parseIpAddress("0.0.0.0"), Port(0))
+      meshBuddy = newTestWakuNode(generateSecp256k1Key())
       meshBuddy.mountMetadata(3, toSeq(0'u16 ..< numShards)).expect(
         "Failed to mount metadata on meshBuddy"
       )
@@ -748,8 +767,7 @@ suite "Messaging API, SubscriptionManager":
 
     var sparePeer: WakuNode
     lockNewGlobalBrokerContext:
-      sparePeer =
-        newTestWakuNode(generateSecp256k1Key(), parseIpAddress("0.0.0.0"), Port(0))
+      sparePeer = newTestWakuNode(generateSecp256k1Key())
       sparePeer.mountMetadata(3, toSeq(0'u16 ..< numShards)).expect(
         "Failed to mount metadata on sparePeer"
       )
@@ -768,34 +786,36 @@ suite "Messaging API, SubscriptionManager":
     await meshBuddy.connectToNodes(@[publisherPeerInfo])
     await sparePeer.connectToNodes(@[publisherPeerInfo])
 
-    let conf = createApiNodeConf(cli_args.WakuMode.Edge, numShards)
-    var subscriber: Waku
+    let conf = createApiNodeConf(messaging_conf.LogosDeliveryMode.Edge, numShards)
+    var subscriber: LogosDelivery
     lockNewGlobalBrokerContext:
-      subscriber = (await createNode(conf)).expect("Failed to create edge subscriber")
-      subscriber.mountMessagingClient().expect("Failed to mount messaging")
+      subscriber =
+        (await LogosDelivery.new(conf)).expect("Failed to create edge subscriber")
       (await subscriber.start()).expect("Failed to start edge subscriber")
 
-    await subscriber.node.connectToNodes(
+    await subscriber.waku.node.connectToNodes(
       @[publisherPeerInfo, meshBuddyPeerInfo, sparePeerInfo]
     )
 
     let testTopic = ContentTopic("/waku/2/replacement-test/proto")
-    let shard = subscriber.node.getRelayShard(testTopic)
+    let shard = subscriber.waku.node.getRelayShard(testTopic)
 
-    (await subscriber.subscribe(testTopic)).expect("Failed to subscribe")
+    (await subscriber.messagingClient.subscribe(testTopic)).expect(
+      "Failed to subscribe"
+    )
 
     # Wait for 2 confirmed peers (HealthyThreshold). The 3rd is available but not dialed.
     check await edgePeersReached(subscriber, shard, 2)
-    require subscriber.node.subscriptionManager.edgeFilterPeerCount(shard) == 2
+    require subscriber.waku.node.subscriptionManager.edgeFilterPeerCount(shard) == 2
 
-    await subscriber.node.disconnectNode(meshBuddyPeerInfo)
+    await subscriber.waku.node.disconnectNode(meshBuddyPeerInfo)
 
     # Wait for the sub loop to detect the loss and dial a replacement
     check await edgePeersReached(subscriber, shard, 2)
 
     await waitForMesh(publisher, shard)
 
-    var eventManager = newReceiveEventListenerManager(subscriber.brokerCtx, 1)
+    var eventManager = newReceiveEventListenerManager(subscriber.waku.brokerCtx, 1)
     let msg = WakuMessage(
       payload: "After replacement".toBytes(),
       contentTopic: testTopic,

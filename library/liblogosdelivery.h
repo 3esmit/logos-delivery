@@ -22,9 +22,14 @@ extern "C"
 
   // Creates a new instance of the node from the given configuration JSON.
   // Returns a pointer to the Context needed by the rest of the API functions.
-  // Configuration should be in JSON format using WakuNodeConf field names.
-  // Field names match Nim identifiers from WakuNodeConf (camelCase).
-  // Example: {"mode": "Core", "clusterId": 42, "relay": true}
+  // The configuration is a JSON object with these optional keys:
+  //   "mode": "Core" | "Edge"        (messaging role; defaults to "Core")
+  //   "preset": "<network preset>"   (e.g. "twn")
+  //   "messagingOverrides": { ... }  (per-field messaging config overrides)
+  //   "channelsOverrides": { ... }   (per-field reliable-channel overrides)
+  // Override keys accept the config field name or its CLI switch name (e.g.
+  // "clusterId" or "cluster-id"). Unknown keys are rejected.
+  // Example: {"mode":"Core","messagingOverrides":{"cluster-id":42,"log-level":"INFO"}}
   void *logosdelivery_create_node(
       const char *configJson,
       FFICallBack callback,
@@ -70,6 +75,36 @@ extern "C"
                  FFICallBack callback,
                  void *userData,
                  const char *messageJson);
+
+  // --- Reliable Channels API (stable surface) ---
+
+  // Create a reliable channel. Returns the channel id.
+  int logosdelivery_channel_create(void *ctx,
+                           FFICallBack callback,
+                           void *userData,
+                           const char *channelId,
+                           const char *contentTopic,
+                           const char *senderId);
+
+  // Send a message on a reliable channel.
+  // messageJson: { "payload": "base64-encoded-payload", "ephemeral": false }
+  // Returns a request ID that can be used to track delivery.
+  int logosdelivery_channel_send(void *ctx,
+                         FFICallBack callback,
+                         void *userData,
+                         const char *channelId,
+                         const char *messageJson);
+
+  // Close a reliable channel: stops its SDS loops; persisted state survives, so
+  // re-creating the channel restores it.
+  int logosdelivery_channel_close(void *ctx,
+                          FFICallBack callback,
+                          void *userData,
+                          const char *channelId);
+
+  // Channel lifecycle events are delivered through the event callback set via
+  // logosdelivery_set_event_callback: "onChannelMessageReceived" (payload
+  // base64-encoded), "onChannelMessageSent", "onChannelMessageError".
 
   // Sets a callback that will be invoked whenever an event occurs.
   // It is crucial that the passed callback is fast, non-blocking and potentially thread-safe.

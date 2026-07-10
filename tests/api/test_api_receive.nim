@@ -14,14 +14,14 @@ import
   logos_delivery/waku/[
     waku_node,
     waku_core,
-    events/message_events,
-    events/health_events,
+    api/events/health_events,
     waku_relay/protocol,
     waku_archive,
     waku_archive/common as archive_common,
   ]
 import logos_delivery/waku/factory/waku_conf
 import tools/confutils/cli_args
+import logos_delivery/api/conf/messaging_conf
 
 const TestTimeout = chronos.seconds(60)
 
@@ -83,22 +83,21 @@ proc waitForConnectionStatus(
     await EventConnectionStatusChange.dropListener(brokerCtx, handle)
 
 proc createApiNodeConf(numShards: uint16 = 1): WakuNodeConf =
-  var conf = defaultWakuNodeConf().valueOr:
-    raiseAssert error
-  conf.mode = cli_args.WakuMode.Core
+  var conf = MessagingClientConf()
+    .toWakuNodeConf(messaging_conf.LogosDeliveryMode.Core).valueOr:
+      raiseAssert error
   conf.listenAddress = parseIpAddress("0.0.0.0")
   conf.tcpPort = Port(0)
   conf.discv5UdpPort = Port(0)
   conf.clusterId = some(3'u16)
   conf.numShardsInNetwork = numShards
-  conf.reliabilityEnabled = some(true)
   conf.rest = false
   result = conf
 
 type TestNetwork = ref object
   storeNode: WakuNode
   publisher: WakuNode
-  subscriber: Waku
+  subscriber: LogosDelivery
   storeNodePeerInfo: RemotePeerInfo
   missedPayload: seq[byte]
 
@@ -114,8 +113,7 @@ proc setupNetwork(testTopic: ContentTopic): Future[TestNetwork] {.async.} =
   # store node: archive + store + relay, subscribed to the shard
   var storeNode: WakuNode
   lockNewGlobalBrokerContext:
-    storeNode =
-      newTestWakuNode(generateSecp256k1Key(), parseIpAddress("0.0.0.0"), Port(0))
+    storeNode = newTestWakuNode(generateSecp256k1Key())
     storeNode.mountMetadata(3, toSeq(0'u16 ..< numShards)).expect(
       "Failed to mount metadata on storeNode"
     )
@@ -133,8 +131,7 @@ proc setupNetwork(testTopic: ContentTopic): Future[TestNetwork] {.async.} =
   # publisher: relay, connected to the store so its messages get archived
   var publisher: WakuNode
   lockNewGlobalBrokerContext:
-    publisher =
-      newTestWakuNode(generateSecp256k1Key(), parseIpAddress("0.0.0.0"), Port(0))
+    publisher = newTestWakuNode(generateSecp256k1Key())
     publisher.mountMetadata(3, toSeq(0'u16 ..< numShards)).expect(
       "Failed to mount metadata on publisher"
     )
@@ -158,12 +155,11 @@ proc setupNetwork(testTopic: ContentTopic): Future[TestNetwork] {.async.} =
 
   # subscriber: created before the publish so the message timestamp lands after
   # its RecvService startTimeToCheck watermark
-  var subscriber: Waku
+  var subscriber: LogosDelivery
   lockNewGlobalBrokerContext:
-    subscriber = (await createNode(createApiNodeConf(numShards))).expect(
+    subscriber = (await LogosDelivery.new(createApiNodeConf(numShards))).expect(
       "Failed to create subscriber"
     )
-    subscriber.mountMessagingClient().expect("Failed to mount messaging")
     (await subscriber.start()).expect("Failed to start subscriber")
 
   # publish while the subscriber is offline: the message reaches the archive but
@@ -188,7 +184,7 @@ proc setupNetwork(testTopic: ContentTopic): Future[TestNetwork] {.async.} =
     raiseAssert "Message was not archived in time"
 
   # subscribe to the content topic; with no peers yet the subscriber stays offline
-  (await subscriber.subscribe(testTopic)).expect("Failed to subscribe")
+  (await subscriber.messagingClient.subscribe(testTopic)).expect("Failed to subscribe")
 
   return TestNetwork(
     storeNode: storeNode,
@@ -217,11 +213,11 @@ suite "Messaging API, Receive Service (store recovery)":
     defer:
       await net.teardown()
 
-    let eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    let eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
     defer:
       await eventManager.teardown()
 
-    await net.subscriber.node.connectToNodes(@[net.storeNodePeerInfo])
+    await net.subscriber.waku.node.connectToNodes(@[net.storeNodePeerInfo])
     await net.subscriber.messagingClient.recvService.checkStore()
 
     check await eventManager.waitForEvents(TestTimeout)
@@ -236,15 +232,15 @@ suite "Messaging API, Receive Service (store recovery)":
     defer:
       await net.teardown()
 
-    let eventManager = newReceiveEventListenerManager(net.subscriber.brokerCtx, 1)
+    let eventManager = newReceiveEventListenerManager(net.subscriber.waku.brokerCtx, 1)
     defer:
       await eventManager.teardown()
 
     # sync on coming online (the transition that fires the backfill) before asserting
     let onlineFut = waitForConnectionStatus(
-      net.subscriber.brokerCtx, ConnectionStatus.PartiallyConnected
+      net.subscriber.waku.brokerCtx, ConnectionStatus.PartiallyConnected
     )
-    await net.subscriber.node.connectToNodes(@[net.storeNodePeerInfo])
+    await net.subscriber.waku.node.connectToNodes(@[net.storeNodePeerInfo])
     await onlineFut
 
     check await eventManager.waitForEvents(TestTimeout)

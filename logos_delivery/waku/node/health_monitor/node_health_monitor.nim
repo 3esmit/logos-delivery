@@ -8,12 +8,13 @@ import
   libp2p/protocols/rendezvous,
   libp2p/protocols/pubsub,
   libp2p/protocols/pubsub/rpc/messages,
+  logos_delivery/api/types,
+  logos_delivery/api/events/kernel_events, # EventConnectionStatusChange
   logos_delivery/waku/[
     waku_relay,
-    waku_rln_relay,
-    api/types,
-    events/health_events,
-    events/peer_events,
+    api/events/health_events,
+    api/events/peer_events,
+    rln,
     node/waku_node,
     node/node_telemetry,
     node/peer_manager,
@@ -89,12 +90,12 @@ proc getRelayHealth(hm: NodeHealthMonitor): ProtocolHealth =
 
 proc getRlnRelayHealth(hm: NodeHealthMonitor): Future[ProtocolHealth] {.async.} =
   var p = ProtocolHealth.init(WakuProtocol.RlnRelayProtocol)
-  if isNil(hm.node.wakuRlnRelay):
+  if isNil(hm.node.rln):
     return p.notMounted()
 
   const FutIsReadyTimout = 5.seconds
 
-  let isReadyStateFut = hm.node.wakuRlnRelay.isReady()
+  let isReadyStateFut = hm.node.rln.isReady()
   if not await isReadyStateFut.withTimeout(FutIsReadyTimout):
     return p.notReady("Ready state check timed out")
 
