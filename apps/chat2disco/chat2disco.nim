@@ -46,7 +46,7 @@ import
   ],
   ./config_chat2disco
 
-import logos_delivery/waku/events/discovery_events
+import logos_delivery/waku/api/events/discovery_events
 
 import libp2p/protocols/pubsub/rpc/messages, libp2p/protocols/pubsub/pubsub
 import libp2p/extended_peer_record # for ServiceInfo
@@ -357,7 +357,7 @@ proc processInput(rfd: AsyncFD, rng: crypto.Rng) {.async.} =
       bootstrapNodes: kadBootstrapPeers,
       randomLookupInterval: chronos.seconds(60),
       serviceLookupInterval: chronos.seconds(60),
-      kadDhtConfig: KadDHTConfig.new(),
+      kadDhtConfig: KadDHTConfig.new(disableBootstrapping = true),
       discoConfig:
         sd_types.ServiceDiscoveryConfig.new(advertExpiry = chronos.seconds(60)),
       clientMode: false,
