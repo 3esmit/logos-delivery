@@ -230,7 +230,7 @@ suite "Waku rln relay":
       rln = (await Rln.new(wakuRlnConfig)).valueOr:
         raiseAssert $error
 
-    let manager = cast[OnchainGroupManager](rln.groupManager)
+    let manager = cast[OnchainGroupManager](rln.groupManager).withFastRetries()
     let idCredentials = generateCredentials()
 
     (waitFor manager.register(idCredentials, UserMessageLimit(20))).isOkOr:
@@ -286,7 +286,7 @@ suite "Waku rln relay":
       rln = (await Rln.new(wakuRlnConfig)).valueOr:
         raiseAssert $error
 
-    let manager = cast[OnchainGroupManager](rln.groupManager)
+    let manager = cast[OnchainGroupManager](rln.groupManager).withFastRetries()
     let idCredentials = generateCredentials()
 
     (waitFor manager.register(idCredentials, UserMessageLimit(20))).isOkOr:
@@ -335,7 +335,8 @@ suite "Waku rln relay":
       wakuRlnRelay1 = (await Rln.new(rlnConf1)).valueOr:
         raiseAssert "failed to create waku rln relay: " & $error
 
-    let manager1 = cast[OnchainGroupManager](wakuRlnRelay1.groupManager)
+    let manager1 =
+      cast[OnchainGroupManager](wakuRlnRelay1.groupManager).withFastRetries()
     let idCredentials1 = generateCredentials()
 
     (waitFor manager1.register(idCredentials1, UserMessageLimit(20))).isOkOr:
@@ -348,7 +349,8 @@ suite "Waku rln relay":
       wakuRlnRelay2 = (await Rln.new(rlnConf2)).valueOr:
         raiseAssert "failed to create waku rln relay: " & $error
 
-    let manager2 = cast[OnchainGroupManager](wakuRlnRelay2.groupManager)
+    let manager2 =
+      cast[OnchainGroupManager](wakuRlnRelay2.groupManager).withFastRetries()
     let idCredentials2 = generateCredentials()
 
     (waitFor manager2.register(idCredentials2, UserMessageLimit(20))).isOkOr:

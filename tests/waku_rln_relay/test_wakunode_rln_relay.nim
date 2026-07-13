@@ -57,7 +57,7 @@ procSuite "WakuNode - RLN relay":
       await node1.start()
 
       # Registration is mandatory before sending messages with rln-relay
-      let manager1 = cast[OnchainGroupManager](node1.rln.groupManager)
+      let manager1 = cast[OnchainGroupManager](node1.rln.groupManager).withFastRetries()
       let idCredentials1 = generateCredentials()
 
       (waitFor manager1.register(idCredentials1, UserMessageLimit(20))).isOkOr:
@@ -80,7 +80,7 @@ procSuite "WakuNode - RLN relay":
       await node2.setRlnValidator(wakuRlnConfig2)
       await node2.start()
 
-      let manager2 = cast[OnchainGroupManager](node2.rln.groupManager)
+      let manager2 = cast[OnchainGroupManager](node2.rln.groupManager).withFastRetries()
       let rootUpdated2 = waitFor manager2.updateRoots()
       info "Updated root for node2", rootUpdated2
 
@@ -98,7 +98,7 @@ procSuite "WakuNode - RLN relay":
       await node3.setRlnValidator(wakuRlnConfig3)
       await node3.start()
 
-      let manager3 = cast[OnchainGroupManager](node3.rln.groupManager)
+      let manager3 = cast[OnchainGroupManager](node3.rln.groupManager).withFastRetries()
       let rootUpdated3 = waitFor manager3.updateRoots()
       info "Updated root for node3", rootUpdated3
 
@@ -168,7 +168,7 @@ procSuite "WakuNode - RLN relay":
         getWakuRlnConfig(manager = manager, index = MembershipIndex(1))
       await node1.setRlnValidator(wakuRlnConfig1)
       await node1.start()
-      let manager1 = cast[OnchainGroupManager](node1.rln.groupManager)
+      let manager1 = cast[OnchainGroupManager](node1.rln.groupManager).withFastRetries()
       let idCredentials1 = generateCredentials()
 
       (waitFor manager1.register(idCredentials1, UserMessageLimit(20))).isOkOr:
@@ -185,7 +185,7 @@ procSuite "WakuNode - RLN relay":
         getWakuRlnConfig(manager = manager, index = MembershipIndex(2))
       await node2.setRlnValidator(wakuRlnConfig2)
       await node2.start()
-      let manager2 = cast[OnchainGroupManager](node2.rln.groupManager)
+      let manager2 = cast[OnchainGroupManager](node2.rln.groupManager).withFastRetries()
       let idCredentials2 = generateCredentials()
 
       (waitFor manager2.register(idCredentials2, UserMessageLimit(20))).isOkOr:
@@ -202,7 +202,7 @@ procSuite "WakuNode - RLN relay":
         getWakuRlnConfig(manager = manager, index = MembershipIndex(3))
       await node3.setRlnValidator(wakuRlnConfig3)
       await node3.start()
-      let manager3 = cast[OnchainGroupManager](node3.rln.groupManager)
+      let manager3 = cast[OnchainGroupManager](node3.rln.groupManager).withFastRetries()
       let idCredentials3 = generateCredentials()
 
       (waitFor manager3.register(idCredentials3, UserMessageLimit(20))).isOkOr:
@@ -319,7 +319,7 @@ procSuite "WakuNode - RLN relay":
       await node1.setRlnValidator(wakuRlnConfig1)
       await node1.start()
 
-      let manager1 = cast[OnchainGroupManager](node1.rln.groupManager)
+      let manager1 = cast[OnchainGroupManager](node1.rln.groupManager).withFastRetries()
       let idCredentials1 = generateCredentials()
 
       (waitFor manager1.register(idCredentials1, UserMessageLimit(20))).isOkOr:
@@ -340,7 +340,7 @@ procSuite "WakuNode - RLN relay":
       await node2.setRlnValidator(wakuRlnConfig2)
       await node2.start()
 
-      let manager2 = cast[OnchainGroupManager](node2.rln.groupManager)
+      let manager2 = cast[OnchainGroupManager](node2.rln.groupManager).withFastRetries()
       let rootUpdated2 = waitFor manager2.updateRoots()
       info "Updated root for node2", rootUpdated2
     lockNewGlobalBrokerContext:
@@ -356,7 +356,7 @@ procSuite "WakuNode - RLN relay":
       await node3.setRlnValidator(wakuRlnConfig3)
       await node3.start()
 
-      let manager3 = cast[OnchainGroupManager](node3.rln.groupManager)
+      let manager3 = cast[OnchainGroupManager](node3.rln.groupManager).withFastRetries()
       let rootUpdated3 = waitFor manager3.updateRoots()
       info "Updated root for node3", rootUpdated3
 
@@ -431,7 +431,7 @@ procSuite "WakuNode - RLN relay":
       await node1.start()
 
       # Registration is mandatory before sending messages with rln-relay
-      let manager1 = cast[OnchainGroupManager](node1.rln.groupManager)
+      let manager1 = cast[OnchainGroupManager](node1.rln.groupManager).withFastRetries()
       let idCredentials1 = generateCredentials()
 
       (waitFor manager1.register(idCredentials1, UserMessageLimit(20))).isOkOr:
@@ -454,7 +454,7 @@ procSuite "WakuNode - RLN relay":
       await node2.start()
 
       # Registration is mandatory before sending messages with rln-relay
-      let manager2 = cast[OnchainGroupManager](node2.rln.groupManager)
+      let manager2 = cast[OnchainGroupManager](node2.rln.groupManager).withFastRetries()
       let rootUpdated2 = waitFor manager2.updateRoots()
       info "Updated root for node2", rootUpdated2
     lockNewGlobalBrokerContext:
@@ -472,7 +472,7 @@ procSuite "WakuNode - RLN relay":
       await node3.start()
 
       # Registration is mandatory before sending messages with rln-relay
-      let manager3 = cast[OnchainGroupManager](node3.rln.groupManager)
+      let manager3 = cast[OnchainGroupManager](node3.rln.groupManager).withFastRetries()
       let rootUpdated3 = waitFor manager3.updateRoots()
       info "Updated root for node3", rootUpdated3
 
@@ -600,7 +600,7 @@ procSuite "WakuNode - RLN relay":
       await node1.start()
 
       # Registration is mandatory before sending messages with rln-relay
-      let manager1 = cast[OnchainGroupManager](node1.rln.groupManager)
+      let manager1 = cast[OnchainGroupManager](node1.rln.groupManager).withFastRetries()
       let idCredentials1 = generateCredentials()
 
       (waitFor manager1.register(idCredentials1, UserMessageLimit(20))).isOkOr:
@@ -619,7 +619,7 @@ procSuite "WakuNode - RLN relay":
       await node2.start()
 
       # Registration is mandatory before sending messages with rln-relay
-      let manager2 = cast[OnchainGroupManager](node2.rln.groupManager)
+      let manager2 = cast[OnchainGroupManager](node2.rln.groupManager).withFastRetries()
       let rootUpdated2 = waitFor manager2.updateRoots()
       info "Updated root for node2", rootUpdated2
 
