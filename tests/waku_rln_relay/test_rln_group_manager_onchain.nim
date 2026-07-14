@@ -303,9 +303,6 @@ suite "Onchain group manager":
     # chunk[0] becomes the MSB after reversal in group_manager; must be < 0x30
     for i in 0 ..< 20:
       manager.merkleProofCache[i * 32] = 0
-    # Pin the freshness throttle so ensureFreshMerkleProofPath does NOT refetch
-    # and overwrite the intentionally-corrupted cache we just planted.
-    manager.lastMerklePathCheckMoment = Moment.now()
 
     let messageBytes = "Hello".toBytes()
 
@@ -435,7 +432,7 @@ suite "Onchain group manager":
       # replaced by a competing refresh.
       manager.rootsRefreshInFlightFut == inFlight
 
-  test "generateProof: fast-paths without refresh inside throttle window":
+  test "validateRoot: cancelling one caller does not cancel the shared roots refresh":
     (waitFor manager.init()).isOkOr:
       raiseAssert $error
 
@@ -443,11 +440,47 @@ suite "Onchain group manager":
     (waitFor manager.register(credentials, UserMessageLimit(20))).isOkOr:
       assert false, "register failed: " & error
 
-    # Prime cache and pin the throttle so the publish-path freshness check
-    # short-circuits on the cached value.
+    manager.lastRootsRefreshMoment = default(Moment)
+    manager.rootsRefreshInFlightFut = nil
+
+    var badRoot: MerkleNode
+    badRoot[0] = 0x66
+
+    let f1 = manager.validateRoot(badRoot)
+    let inFlight = manager.rootsRefreshInFlightFut
+    let f2 = manager.validateRoot(badRoot)
+
+    check:
+      inFlight != nil
+      not inFlight.finished()
+
+    # Cancel the initiating caller; the shared refresh must keep running for
+    # the coalesced one.
+    waitFor f1.cancelAndWait()
+
+    check:
+      f1.cancelled()
+      not inFlight.cancelled()
+
+    discard waitFor f2
+
+    check:
+      inFlight.completed()
+      manager.rootsRefreshInFlightFut == inFlight
+
+  test "generateProof: fast-paths without refresh when cache is populated":
+    (waitFor manager.init()).isOkOr:
+      raiseAssert $error
+
+    let credentials = generateCredentials()
+    (waitFor manager.register(credentials, UserMessageLimit(20))).isOkOr:
+      assert false, "register failed: " & error
+
+    # Prime cache. A non-empty cache short-circuits ensureFreshMerkleProofPath;
+    # the retry path invalidates the cache via invalidateMerkleProofCache before
+    # calling proof-gen again.
     manager.merkleProofCache = (waitFor manager.fetchMerkleProofElements()).valueOr:
       raiseAssert "failed to fetch initial path: " & error
-    manager.lastMerklePathCheckMoment = Moment.now()
     manager.proofPathRefreshInFlightFut = nil
 
     let primedCache = manager.merkleProofCache
@@ -498,7 +531,7 @@ suite "Onchain group manager":
       res.isErr()
       res.error == "membership index is not set"
 
-  test "ensureFreshMerkleProofPath: refetches when throttle window has expired":
+  test "invalidateMerkleProofCache + ensureFreshMerkleProofPath refetches":
     (waitFor manager.init()).isOkOr:
       raiseAssert $error
 
@@ -506,22 +539,21 @@ suite "Onchain group manager":
     (waitFor manager.register(credentials, UserMessageLimit(20))).isOkOr:
       assert false, "register failed: " & error
 
-    # Prime cache with a non-empty value and an old throttle timestamp, so
-    # the cache fast-path does NOT trigger and we exercise the refetch branch.
+    # Prime cache with a non-empty value, then take the retry path:
+    # invalidate empties the cache so ensureFreshMerkleProofPath refetches.
     manager.merkleProofCache = (waitFor manager.fetchMerkleProofElements()).valueOr:
       raiseAssert "failed to prime path: " & error
-    manager.lastMerklePathCheckMoment = Moment.now() - PathCheckMinInterval - 1.seconds
     manager.proofPathRefreshInFlightFut = nil
 
-    let preCheckTs = manager.lastMerklePathCheckMoment
+    manager.invalidateMerkleProofCache()
+    check manager.merkleProofCache.len == 0
+
     let res = waitFor manager.ensureFreshMerkleProofPath()
 
     check:
       res.isOk()
       manager.merkleProofCache.len > 0
       manager.proofPathRefreshInFlightFut != nil
-      # lastMerklePathCheckMoment was bumped to "now" by the refetch.
-      manager.lastMerklePathCheckMoment > preCheckTs
 
   test "ensureFreshMerkleProofPath: refresh bumps the member-count metric":
     (waitFor manager.init()).isOkOr:
@@ -554,12 +586,10 @@ suite "Onchain group manager":
     (waitFor manager.register(credentials, UserMessageLimit(20))).isOkOr:
       assert false, "register failed: " & error
 
-    # Empty cache + epoch-zero check timestamp guarantees the first caller
-    # will fall through to fetchMerkleProofElements; the followers should
-    # observe the resulting in-flight future and await it rather than start
-    # their own refresh.
+    # Empty cache guarantees the first caller will fall through to
+    # fetchMerkleProofElements; the followers should observe the resulting
+    # in-flight future and await it rather than start their own refresh.
     manager.merkleProofCache = @[]
-    manager.lastMerklePathCheckMoment = default(Moment)
     manager.proofPathRefreshInFlightFut = nil
 
     let f1 = manager.ensureFreshMerkleProofPath()
@@ -588,6 +618,130 @@ suite "Onchain group manager":
       # refresh while the first was still in flight.
       manager.proofPathRefreshInFlightFut == inFlight
       manager.merkleProofCache.len > 0
+
+  test "ensureFreshMerkleProofPath: cancelling one caller does not cancel the shared refetch":
+    (waitFor manager.init()).isOkOr:
+      raiseAssert $error
+
+    let credentials = generateCredentials()
+    (waitFor manager.register(credentials, UserMessageLimit(20))).isOkOr:
+      assert false, "register failed: " & error
+
+    manager.merkleProofCache = @[]
+    manager.proofPathRefreshInFlightFut = nil
+
+    let f1 = manager.ensureFreshMerkleProofPath()
+    let inFlight = manager.proofPathRefreshInFlightFut
+    let f2 = manager.ensureFreshMerkleProofPath()
+
+    check:
+      inFlight != nil
+      not inFlight.finished()
+
+    # Cancel the initiating caller — models a publish retry whose refresh
+    # timeout fired while the refetch was still in flight.
+    waitFor f1.cancelAndWait()
+
+    check:
+      f1.cancelled()
+      # The shared refetch survives the caller's cancellation.
+      not inFlight.cancelled()
+
+    # The coalesced caller still completes and the cache gets populated.
+    let r2 = waitFor f2
+    check:
+      r2.isOk()
+      manager.merkleProofCache.len > 0
+      manager.proofPathRefreshInFlightFut == inFlight
+
+  test "scheduleMerkleProofRefresh: drops the cache and refetches in the background":
+    (waitFor manager.init()).isOkOr:
+      raiseAssert $error
+
+    let credentials = generateCredentials()
+    (waitFor manager.register(credentials, UserMessageLimit(20))).isOkOr:
+      assert false, "register failed: " & error
+
+    # Prime the cache, then corrupt it to model the stale path a publish
+    # rejection points at.
+    let goodCache = (waitFor manager.fetchMerkleProofElements()).valueOr:
+      raiseAssert "failed to prime path: " & error
+    manager.merkleProofCache = newSeq[byte](goodCache.len)
+    manager.proofPathRefreshInFlightFut = nil
+
+    manager.scheduleMerkleProofRefresh()
+
+    # The call returns without waiting; the refetch is already in flight.
+    let inFlight = manager.proofPathRefreshInFlightFut
+    check inFlight != nil
+
+    waitFor inFlight.join()
+    check manager.merkleProofCache == goodCache
+
+  test "ensureFreshMerkleProofPath: invalidate during the refetch does not fail callers":
+    (waitFor manager.init()).isOkOr:
+      raiseAssert $error
+
+    let credentials = generateCredentials()
+    (waitFor manager.register(credentials, UserMessageLimit(20))).isOkOr:
+      assert false, "register failed: " & error
+
+    manager.merkleProofCache = @[]
+    manager.proofPathRefreshInFlightFut = nil
+
+    # Both callers coalesce onto a refetch suspended on the eth call.
+    let f1 = manager.ensureFreshMerkleProofPath()
+    let inFlight = manager.proofPathRefreshInFlightFut
+    let f2 = manager.ensureFreshMerkleProofPath()
+
+    check:
+      inFlight != nil
+      not inFlight.finished()
+
+    # A publish rejection lands mid-fetch. The invalidate must neither fail
+    # the coalesced callers nor be swallowed by the fetch it raced: the path
+    # they receive is refetched after the invalidate.
+    manager.invalidateMerkleProofCache()
+    check manager.merkleProofCache.len == 0
+
+    let r1 = waitFor f1
+    let r2 = waitFor f2
+
+    check:
+      r1.isOk()
+      r1.get().len > 0
+      r2.isOk()
+      r2.get() == r1.get()
+      # The post-invalidate refetch repopulated the cache.
+      manager.merkleProofCache == r1.get()
+
+  test "generateProof: succeeds when the cache is invalidated mid-refetch":
+    (waitFor manager.init()).isOkOr:
+      raiseAssert $error
+
+    let credentials = generateCredentials()
+    (waitFor manager.register(credentials, UserMessageLimit(20))).isOkOr:
+      assert false, "register failed: " & error
+
+    manager.merkleProofCache = @[]
+    manager.proofPathRefreshInFlightFut = nil
+
+    # generateProof runs down to the refetch's suspended eth call.
+    let proofFut = manager.generateProof(
+      data = "hello".toBytes(), epoch = default(Epoch), messageId = MessageId(1)
+    )
+
+    check:
+      manager.proofPathRefreshInFlightFut != nil
+      not manager.proofPathRefreshInFlightFut.finished()
+
+    # A concurrent publish rejection empties the cache while proof-gen waits
+    # on the refetch.
+    manager.invalidateMerkleProofCache()
+
+    let proofRes = waitFor proofFut
+    check:
+      proofRes.isOk()
 
   test "verifyProof: should verify valid proof":
     let credentials = generateCredentials()
@@ -657,9 +811,6 @@ suite "Onchain group manager":
     # chunk[0] becomes the MSB after reversal in group_manager; must be < 0x30
     for i in 0 ..< 20:
       manager.merkleProofCache[i * 32] = 0
-    # Pin the freshness throttle so ensureFreshMerkleProofPath does NOT refetch
-    # and overwrite the intentionally-corrupted cache we just planted.
-    manager.lastMerklePathCheckMoment = Moment.now()
 
     let epoch = default(Epoch)
     info "epoch in bytes", epochHex = epoch.inHex()

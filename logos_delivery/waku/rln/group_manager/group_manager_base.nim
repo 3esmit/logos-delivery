@@ -141,5 +141,15 @@ method generateProof*(
   ## Dummy implementation for generateProof
   return err("generateProof is not implemented")
 
+method invalidateMerkleProofCache*(g: GroupManager) {.base, gcsafe, raises: [].} =
+  ## Drops the cached merkle proof path so the next proof-gen refetches from
+  ## chain. Called after a publish is rejected on a stale cache. No-op base.
+  discard
+
+method scheduleMerkleProofRefresh*(g: GroupManager) {.base, gcsafe, raises: [].} =
+  ## Like `invalidateMerkleProofCache`, but starts the refetch in the
+  ## background so the caller need not wait for it. No-op base.
+  discard
+
 method isReady*(g: GroupManager): Future[bool] {.base, async.} =
   return true

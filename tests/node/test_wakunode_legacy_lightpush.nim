@@ -1,7 +1,7 @@
 {.used.}
 
 import
-  std/[options, tempfiles, net, osproc],
+  std/[options, tempfiles, net, osproc, strutils],
   testutils/unittests,
   chronos,
   std/strformat,
@@ -16,6 +16,7 @@ import
     waku_lightpush_legacy/common,
     waku_lightpush_legacy/protocol_metrics,
     rln,
+    rln/constants,
   ],
   ../testlib/[wakucore, wakunode, testasync, futures, testutils],
   ../resources/payloads,
@@ -120,7 +121,10 @@ suite "RLN Proofs as a Lightpush Service":
     # mount rln-relay
     # match prod epoch window to reduce test flake
     wakuRlnConfig = getWakuRlnConfig(
-      manager = manager, index = MembershipIndex(1), epochSizeSec = 600
+      manager = manager,
+      userMessageLimit = 20,
+      index = MembershipIndex(1),
+      epochSizeSec = 600,
     )
 
     await allFutures(server.start(), client.start())
@@ -179,6 +183,95 @@ suite "RLN Proofs as a Lightpush Service":
       # Then the message is not relayed but not due to RLN
       assert publishResponse.isErr(), "We expect an error response"
       check publishResponse.error == protocol_metrics.notPublishedAnyPeer
+
+    # The tests below drive `server.legacyLightpushPublish(...)` against the
+    # server node. Because `server.wakuLegacyLightPush` is mounted (and no
+    # legacy client is), the call takes the self-request path — it still runs
+    # the full client-side flow (proof gen, retry on RlnValidatorErrorMsg
+    # substring, one-retry cap), but the request lands in the local
+    # pushHandler. Swapping in a stub pushHandler lets each test control what
+    # attempt N sees.
+
+    asyncTest "retry fires on RlnValidatorErrorMsg substring and second attempt succeeds":
+      var callCount = 0
+      let stub: PushMessageHandler = proc(
+          pubsubTopic: PubsubTopic, message: WakuMessage
+      ): Future[WakuLightPushResult[void]] {.async.} =
+        inc callCount
+        if callCount == 1:
+          return err(RlnValidatorErrorMsg & ": simulated stale merkle path")
+        return ok()
+      server.wakuLegacyLightPush.pushHandler = stub
+
+      let response = await server.legacyLightpushPublish(
+        some(pubsubTopic), message, server.peerInfo.toRemotePeerInfo()
+      )
+
+      check:
+        callCount == 2
+        response.isOk()
+
+    asyncTest "no retry when error does not contain RlnValidatorErrorMsg":
+      var callCount = 0
+      let stub: PushMessageHandler = proc(
+          pubsubTopic: PubsubTopic, message: WakuMessage
+      ): Future[WakuLightPushResult[void]] {.async.} =
+        inc callCount
+        return err("unrelated failure")
+      server.wakuLegacyLightPush.pushHandler = stub
+
+      let response = await server.legacyLightpushPublish(
+        some(pubsubTopic), message, server.peerInfo.toRemotePeerInfo()
+      )
+
+      check:
+        callCount == 1
+        response.isErr()
+        response.error == "unrelated failure"
+
+    asyncTest "retry cap: two consecutive RLN errors surface the second":
+      var callCount = 0
+      let stub: PushMessageHandler = proc(
+          pubsubTopic: PubsubTopic, message: WakuMessage
+      ): Future[WakuLightPushResult[void]] {.async.} =
+        inc callCount
+        return err(RlnValidatorErrorMsg & ": still stale")
+      server.wakuLegacyLightPush.pushHandler = stub
+
+      let response = await server.legacyLightpushPublish(
+        some(pubsubTopic), message, server.peerInfo.toRemotePeerInfo()
+      )
+
+      check:
+        callCount == 2
+        response.isErr()
+        response.error.contains(RlnValidatorErrorMsg)
+
+    asyncTest "no retry when node.rln is nil":
+      # Detach RLN so the retry branch short-circuits on rln.isNone() even
+      # when the error string carries RlnValidatorErrorMsg. Restore before
+      # teardown so server.stop() sees the same object graph it was
+      # constructed with.
+      let savedRln = server.rln
+      server.rln = nil
+
+      var callCount = 0
+      let stub: PushMessageHandler = proc(
+          pubsubTopic: PubsubTopic, message: WakuMessage
+      ): Future[WakuLightPushResult[void]] {.async.} =
+        inc callCount
+        return err(RlnValidatorErrorMsg & ": simulated")
+      server.wakuLegacyLightPush.pushHandler = stub
+
+      let response = await server.legacyLightpushPublish(
+        some(pubsubTopic), message, server.peerInfo.toRemotePeerInfo()
+      )
+
+      server.rln = savedRln
+
+      check:
+        callCount == 1
+        response.isErr()
 
 suite "Waku Legacy Lightpush message delivery":
   asyncTest "Legacy lightpush message flow succeed":

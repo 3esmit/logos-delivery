@@ -233,10 +233,11 @@ proc mount(
     proc(
         msg: WakuMessage, senderEpochTime: float64
     ): Future[Result[RequestGenerateRlnProof, string]] {.async.} =
-      let proof = (await rln.generateRLNProof(msg.toRLNSignal(), senderEpochTime)).valueOr:
+      let proofBytes = (
+        await rln.generateRLNProofWithRootRefresh(msg.toRLNSignal(), senderEpochTime)
+      ).valueOr:
         return err("Could not create RLN proof: " & error)
-
-      return ok(RequestGenerateRlnProof(proof: proof)),
+      return ok(RequestGenerateRlnProof(proof: proofBytes)),
   ).isOkOr:
     return err("Proof generator provider cannot be set: " & $error)
 

@@ -51,6 +51,49 @@ proc validatePubSubTopics(topics: seq[PubsubTopic]): Result[void, RestApiRespons
 
   return ok()
 
+type
+  RlnPublishErrorKind = enum
+    ProofGenFailed ## Local proof generation failed — server-side (500).
+    ValidationRejected ## Validator rejected the message — client-side (400).
+    StaleProofSuspected ## Stale merkle path; refresh scheduled — retry (503).
+
+  RlnPublishError = object
+    kind: RlnPublishErrorKind
+    desc: string
+
+proc attachRlnProofAndValidate(
+    rln: Rln, wakuRelay: WakuRelay, pubsubTopic: PubsubTopic, message: WakuMessage
+): Future[Result[WakuMessage, RlnPublishError]] {.async.} =
+  ## Attaches an RLN proof to `message` and validates it via `wakuRelay`.
+  ## If the validator rejects it as RLN-invalid (error contains
+  ## RlnValidatorErrorMsg), schedules a background merkle proof refresh and
+  ## fails early with StaleProofSuspected — the caller decides whether to
+  ## retry. Callers invoke only when RLN is mounted.
+  var msg = message
+  msg.proof = (
+    await rln.generateRLNProof(msg.toRLNSignal(), float64(getTime().toUnix()))
+  ).valueOr:
+    return err(
+      RlnPublishError(
+        kind: ProofGenFailed, desc: "error appending RLN proof to message: " & $error
+      )
+    )
+
+  let validateResult = await wakuRelay.validateMessage(pubsubTopic, msg)
+  if validateResult.isOk():
+    return ok(msg)
+  if not validateResult.error.contains(RlnValidatorErrorMsg):
+    return err(RlnPublishError(kind: ValidationRejected, desc: validateResult.error))
+
+  info "relay publish rejected as RLN-invalid; scheduling merkle proof refresh"
+  rln.groupManager.scheduleMerkleProofRefresh()
+  return err(
+    RlnPublishError(
+      kind: StaleProofSuspected,
+      desc: RlnProofRefreshScheduledMsg & ": " & validateResult.error,
+    )
+  )
+
 proc installRelayApiHandlers*(
     router: var RestRouter, node: WakuNode, cache: MessageCache
 ) =
@@ -166,21 +209,20 @@ proc installRelayApiHandlers*(
     var message: WakuMessage = reqWakuMessage.toWakuMessage(version = 0).valueOr:
       return RestApiResponse.badRequest($error)
 
-    # if RLN is mounted, append the proof to the message
     if not node.rln.isNil():
-      # append the proof to the message
-
-      message.proof = (
-        await node.rln.generateRLNProof(
-          message.toRLNSignal(), float64(getTime().toUnix())
-        )
+      message = (
+        await attachRlnProofAndValidate(node.rln, node.wakuRelay, pubsubTopic, message)
       ).valueOr:
-        return RestApiResponse.internalServerError(
-          "Failed to publish: error appending RLN proof to message: " & $error
-        )
-
-    (await node.wakuRelay.validateMessage(pubsubTopic, message)).isOkOr:
-      return RestApiResponse.badRequest("Failed to publish: " & error)
+        case error.kind
+        of ProofGenFailed:
+          return RestApiResponse.internalServerError("Failed to publish: " & error.desc)
+        of ValidationRejected:
+          return RestApiResponse.badRequest("Failed to publish: " & error.desc)
+        of StaleProofSuspected:
+          return RestApiResponse.serviceUnavailable("Failed to publish: " & error.desc)
+    else:
+      (await node.wakuRelay.validateMessage(pubsubTopic, message)).isOkOr:
+        return RestApiResponse.badRequest("Failed to publish: " & error)
 
     # Log for message tracking purposes
     logMessageInfo(node.wakuRelay, "rest", pubsubTopic, "none", message, onRecv = true)
@@ -297,19 +339,20 @@ proc installRelayApiHandlers*(
         error "publish error", err = msg
         return RestApiResponse.badRequest("Failed to publish. " & msg)
 
-    # if RLN is mounted, append the proof to the message
     if not node.rln.isNil():
-      message.proof = (
-        await node.rln.generateRLNProof(
-          message.toRLNSignal(), float64(getTime().toUnix())
-        )
+      message = (
+        await attachRlnProofAndValidate(node.rln, node.wakuRelay, pubsubTopic, message)
       ).valueOr:
-        return RestApiResponse.internalServerError(
-          "Failed to publish: error appending RLN proof to message: " & error
-        )
-
-    (await node.wakuRelay.validateMessage(pubsubTopic, message)).isOkOr:
-      return RestApiResponse.badRequest("Failed to publish: " & error)
+        case error.kind
+        of ProofGenFailed:
+          return RestApiResponse.internalServerError("Failed to publish: " & error.desc)
+        of ValidationRejected:
+          return RestApiResponse.badRequest("Failed to publish: " & error.desc)
+        of StaleProofSuspected:
+          return RestApiResponse.serviceUnavailable("Failed to publish: " & error.desc)
+    else:
+      (await node.wakuRelay.validateMessage(pubsubTopic, message)).isOkOr:
+        return RestApiResponse.badRequest("Failed to publish: " & error)
 
     # Log for message tracking purposes
     logMessageInfo(node.wakuRelay, "rest", pubsubTopic, "none", message, onRecv = true)
