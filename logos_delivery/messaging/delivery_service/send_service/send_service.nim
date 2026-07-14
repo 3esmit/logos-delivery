@@ -259,6 +259,15 @@ proc trySendMessages(self: SendService) {.async.} =
       ## `NextRoundRetry` and are retried as the epoch rolls over.
       (await self.rateLimitManager.admit(task.msg.payload)).isOkOr:
         continue
+
+      ## Strictly after admission, so a rejected message never draws a nonce.
+      ## A no-op when RLN is not mounted, or when a prior round already
+      ## attached a proof.
+      task.msg = (await self.waku.attachRlnProof(task.msg)).valueOr:
+        error "SendService: failed to attach RLN proof, retrying next round",
+          requestId = task.requestId, error = error
+        continue
+
     await self.sendProcessor.process(task)
 
 proc serviceLoop(self: SendService) {.async.} =
@@ -291,6 +300,15 @@ proc send*(self: SendService, task: DeliveryTask) {.async.} =
   (await self.rateLimitManager.admit(task.msg.payload)).isOkOr:
     info "SendService.send: over rate-limit budget, parking task",
       requestId = task.requestId, msgHash = task.msgHash.to0xHex()
+    task.state = DeliveryState.NextRoundRetry
+    self.addTask(task)
+    return
+
+  ## Strictly after admission, so a rejected message never draws a nonce.
+  ## A no-op when RLN is not mounted.
+  task.msg = (await self.waku.attachRlnProof(task.msg)).valueOr:
+    error "SendService.send: failed to attach RLN proof, parking task",
+      requestId = task.requestId, error = error
     task.state = DeliveryState.NextRoundRetry
     self.addTask(task)
     return
