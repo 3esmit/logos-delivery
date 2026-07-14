@@ -59,8 +59,8 @@ proc advertise*(
   ).valueOr:
     return
       err("rendezvous advertisement failed: Failed to sign Waku Peer Record: " & $error)
-  let sprBuff = se.encode().valueOr:
-    return err("rendezvous advertisement failed: Wrong Signed Peer Record: " & $error)
+  # libp2p >= 2.2: SignedPayload.encode returns seq[byte] (no longer Result)
+  let sprBuff = se.encode()
 
   # rendezvous.advertise expects already opened connections
   # must dial first

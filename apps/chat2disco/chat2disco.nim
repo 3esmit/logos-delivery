@@ -203,7 +203,7 @@ proc joinRoom(c: Chat, roomName: string) {.async.} =
     if not c.node.wakuKademlia.isNil():
       c.node.wakuKademlia.removeServiceToDiscover(c.currentPubsubTopic)
       await c.node.wakuKademlia.removeServiceToAdvertise(
-        ServiceInfo(id: c.currentPubsubTopic, data: @[])
+        ServiceInfo(id: c.currentPubsubTopic, data: Opt.none(seq[byte]))
       )
 
   c.currentPubsubTopic = roomName
@@ -220,7 +220,7 @@ proc joinRoom(c: Chat, roomName: string) {.async.} =
   echo "subscribed to pubsub topic: ", roomName
 
   if not c.node.wakuKademlia.isNil():
-    let svcInfo = ServiceInfo(id: roomName, data: @[])
+    let svcInfo = ServiceInfo(id: roomName, data: Opt.none(seq[byte]))
     c.node.wakuKademlia.addServiceToDiscover(roomName)
     c.node.wakuKademlia.addServiceToAdvertise(svcInfo)
     echo "advertising and discovering kademlia service: ", roomName
