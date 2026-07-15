@@ -9,49 +9,45 @@ import
   library/events/json_message_event,
   library/declare_lib
 
-proc waku_filter_subscribe(
-    ctx: ptr FFIContext[LogosDelivery],
-    callback: FFICallBack,
-    userData: pointer,
-    pubSubTopic: cstring,
-    contentTopics: cstring,
-) {.ffi.} =
-  proc onReceivedMessage(ctx: ptr FFIContext[LogosDelivery]): FilterPushHandler =
+proc wakuFilterSubscribe*(
+    lib: LogosDelivery, pubSubTopic: string, contentTopics: string
+): Future[Result[string, string]] {.ffi.} =
+  proc receivedMessageHandler(): FilterPushHandler =
     return proc(pubsubTopic: PubsubTopic, msg: WakuMessage) {.async.} =
-      callEventCallback(ctx, "onReceivedMessage"):
-        $JsonMessageEvent.new(pubsubTopic, msg)
+      # This handler is `raises: [Defect]`, so the payload build has to be guarded.
+      try:
+        emitReceivedMessage(pubsubTopic, msg)
+      except Exception, CatchableError:
+        error "onReceivedMessage failed to emit event",
+          error = getCurrentExceptionMsg()
 
   (
-    await ctx.myLib[].waku.filterSubscribe(
-      PubsubTopic($pubSubTopic),
-      ($contentTopics).split(",").mapIt(ContentTopic(it)),
-      FilterPushHandler(onReceivedMessage(ctx)),
+    await lib.waku.filterSubscribe(
+      PubsubTopic(pubSubTopic),
+      contentTopics.split(",").mapIt(ContentTopic(it)),
+      FilterPushHandler(receivedMessageHandler()),
     )
   ).isOkOr:
     error "fail filter subscribe", error = error
     return err(error)
   return ok("")
 
-proc waku_filter_unsubscribe(
-    ctx: ptr FFIContext[LogosDelivery],
-    callback: FFICallBack,
-    userData: pointer,
-    pubSubTopic: cstring,
-    contentTopics: cstring,
-) {.ffi.} =
+proc wakuFilterUnsubscribe*(
+    lib: LogosDelivery, pubSubTopic: string, contentTopics: string
+): Future[Result[string, string]] {.ffi.} =
   (
-    await ctx.myLib[].waku.filterUnsubscribe(
-      PubsubTopic($pubSubTopic), ($contentTopics).split(",").mapIt(ContentTopic(it))
+    await lib.waku.filterUnsubscribe(
+      PubsubTopic(pubSubTopic), contentTopics.split(",").mapIt(ContentTopic(it))
     )
   ).isOkOr:
     error "fail filter unsubscribe", error = error
     return err(error)
   return ok("")
 
-proc waku_filter_unsubscribe_all(
-    ctx: ptr FFIContext[LogosDelivery], callback: FFICallBack, userData: pointer
-) {.ffi.} =
-  (await ctx.myLib[].waku.filterUnsubscribeAll()).isOkOr:
+proc wakuFilterUnsubscribeAll*(
+    lib: LogosDelivery
+): Future[Result[string, string]] {.ffi.} =
+  (await lib.waku.filterUnsubscribeAll()).isOkOr:
     error "fail filter unsubscribe all", error = error
     return err(error)
   return ok("")

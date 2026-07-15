@@ -61,7 +61,7 @@ requires "nim >= 2.2.4",
 
 # Packages not on nimble (use git URLs)
 
-requires "https://github.com/logos-messaging/nim-ffi#v0.1.3"
+requires "https://github.com/logos-messaging/nim-ffi#master"
 
 requires "https://github.com/logos-messaging/nim-sds.git#b12f5ee07c5b764303b51fb948b32a4ade1de3b5"
 
@@ -503,6 +503,14 @@ task liblogosdeliveryStaticLinux, "Generate bindings":
 
 task liblogosdeliveryStaticMac, "Generate bindings":
   buildLibStaticMac("liblogosdelivery", "library")
+
+task liblogosdeliveryGenBindingsRust, "Emit the Rust bindings for liblogosdelivery":
+  # --compileOnly is enough: genBindings() writes the files during macro
+  # expansion, so nothing needs linking.
+  exec "nim c --threads:on --mm:refc --skipParentCfg:off -d:discv5_protocol_id=d5waku " &
+    "-d:ffiGenBindings -d:targetLang=rust -d:ffiOutputDir=library/rust_bindings " &
+    "-d:ffiSrcPath=library/liblogosdelivery.nim " & getMyCPU() & getNimParams() &
+    " --compileOnly library/liblogosdelivery.nim"
 
 ### Formatting tasks
 

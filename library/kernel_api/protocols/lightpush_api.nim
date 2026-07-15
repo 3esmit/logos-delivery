@@ -7,16 +7,12 @@ import
   library/events/json_message_event,
   library/declare_lib
 
-proc waku_lightpush_publish(
-    ctx: ptr FFIContext[LogosDelivery],
-    callback: FFICallBack,
-    userData: pointer,
-    pubSubTopic: cstring,
-    jsonWakuMessage: cstring,
-) {.ffi.} =
+proc wakuLightpushPublish*(
+    lib: LogosDelivery, pubSubTopic: string, jsonWakuMessage: string
+): Future[Result[string, string]] {.ffi.} =
   var jsonMessage: JsonMessage
   try:
-    let jsonContent = parseJson($jsonWakuMessage)
+    let jsonContent = parseJson(jsonWakuMessage)
     jsonMessage = JsonMessage.fromJsonNode(jsonContent).valueOr:
       raise newException(JsonParsingError, $error)
   except JsonParsingError as exc:
@@ -26,7 +22,7 @@ proc waku_lightpush_publish(
     return err("Problem building the WakuMessage: " & $error)
 
   let msgHashHex = (
-    await ctx.myLib[].waku.lightpushPublish(PubsubTopic($pubSubTopic), msg)
+    await lib.waku.lightpushPublish(PubsubTopic(pubSubTopic), msg)
   ).valueOr:
     error "PUBLISH failed", error = error
     return err(error)

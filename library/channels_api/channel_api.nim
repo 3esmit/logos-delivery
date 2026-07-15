@@ -7,46 +7,34 @@ import
   logos_delivery/api/types,
   ../declare_lib
 
-proc logosdelivery_channel_create(
-    ctx: ptr FFIContext[LogosDelivery],
-    callback: FFICallBack,
-    userData: pointer,
-    channelIdStr: cstring,
-    contentTopicStr: cstring,
-    senderIdStr: cstring,
-) {.ffi.} =
-  requireInitializedNode(ctx, "ChannelCreate"):
+proc logosdeliveryChannelCreate*(
+    lib: LogosDelivery,
+    channelIdStr: string,
+    contentTopicStr: string,
+    senderIdStr: string,
+): Future[Result[string, string]] {.ffi.} =
+  requireChannels(lib, "ChannelCreate"):
     return err(errMsg)
 
-  requireChannels(ctx, "ChannelCreate"):
-    return err(errMsg)
-
-  let id = ctx.myLib[].reliableChannelManager.createReliableChannel(
-    ChannelId($channelIdStr),
-    ContentTopic($contentTopicStr),
-    SdsParticipantID($senderIdStr),
+  let id = lib.reliableChannelManager.createReliableChannel(
+    ChannelId(channelIdStr),
+    ContentTopic(contentTopicStr),
+    SdsParticipantID(senderIdStr),
   ).valueOr:
     return err("ChannelCreate failed: " & $error)
 
   return ok(string(id))
 
-proc logosdelivery_channel_send(
-    ctx: ptr FFIContext[LogosDelivery],
-    callback: FFICallBack,
-    userData: pointer,
-    channelIdStr: cstring,
-    messageJson: cstring,
-) {.ffi.} =
+proc logosdeliveryChannelSend*(
+    lib: LogosDelivery, channelIdStr: string, messageJson: string
+): Future[Result[string, string]] {.ffi.} =
   ## `messageJson` carries `{ "payload": <base64>, "ephemeral": <bool> }`.
-  requireInitializedNode(ctx, "ChannelSend"):
-    return err(errMsg)
-
-  requireChannels(ctx, "ChannelSend"):
+  requireChannels(lib, "ChannelSend"):
     return err(errMsg)
 
   var jsonNode: JsonNode
   try:
-    jsonNode = parseJson($messageJson)
+    jsonNode = parseJson(messageJson)
   except Exception as e:
     return err("Failed to parse channel message JSON: " & e.msg)
 
@@ -59,27 +47,19 @@ proc logosdelivery_channel_send(
   let ephemeral = jsonNode.getOrDefault("ephemeral").getBool(false)
 
   let requestId = (
-    await ctx.myLib[].reliableChannelManager.send(
-      ChannelId($channelIdStr), payload, ephemeral
-    )
+    await lib.reliableChannelManager.send(ChannelId(channelIdStr), payload, ephemeral)
   ).valueOr:
     return err("ChannelSend failed: " & $error)
 
   return ok($requestId)
 
-proc logosdelivery_channel_close(
-    ctx: ptr FFIContext[LogosDelivery],
-    callback: FFICallBack,
-    userData: pointer,
-    channelIdStr: cstring,
-) {.ffi.} =
-  requireInitializedNode(ctx, "ChannelClose"):
+proc logosdeliveryChannelClose*(
+    lib: LogosDelivery, channelIdStr: string
+): Future[Result[string, string]] {.ffi.} =
+  requireChannels(lib, "ChannelClose"):
     return err(errMsg)
 
-  requireChannels(ctx, "ChannelClose"):
-    return err(errMsg)
-
-  (await ctx.myLib[].reliableChannelManager.closeChannel(ChannelId($channelIdStr))).isOkOr:
+  (await lib.reliableChannelManager.closeChannel(ChannelId(channelIdStr))).isOkOr:
     return err("ChannelClose failed: " & $error)
 
   return ok("")

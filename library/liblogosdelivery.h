@@ -102,15 +102,24 @@ extern "C"
                           void *userData,
                           const char *channelId);
 
-  // Channel lifecycle events are delivered through the event callback set via
-  // logosdelivery_set_event_callback: "onChannelMessageReceived" (payload
+  // Channel lifecycle events are delivered to listeners registered via
+  // logosdelivery_add_event_listener: "onChannelMessageReceived" (payload
   // base64-encoded), "onChannelMessageSent", "onChannelMessageError".
 
-  // Sets a callback that will be invoked whenever an event occurs.
+  // Registers a callback invoked whenever the named event fires. Listeners are
+  // per event name; register once per event you care about. Returns the listener
+  // id (> 0) to pass to logosdelivery_remove_event_listener, or 0 if callback is
+  // NULL.
   // It is crucial that the passed callback is fast, non-blocking and potentially thread-safe.
-  void logosdelivery_set_event_callback(void *ctx,
+  uint64_t logosdelivery_add_event_listener(void *ctx,
+                                 const char *eventName,
                                  FFICallBack callback,
                                  void *userData);
+
+  // Unregisters the listener with the given id. Returns RET_OK when a listener
+  // was removed, RET_ERR otherwise.
+  int logosdelivery_remove_event_listener(void *ctx,
+                                 uint64_t listenerId);
 
   // Retrieves the list of available node info IDs.
   int logosdelivery_get_available_node_info_ids(void *ctx,

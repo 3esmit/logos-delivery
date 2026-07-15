@@ -33,3 +33,8 @@ include
 # logosdelivery_* surface in ./logos_delivery_api/node_api. The former
 # waku_new / waku_start / waku_stop / waku_destroy entry points were removed to
 # avoid maintaining two parallel node-lifecycle APIs.
+
+# Must stay the last FFI call in the compilation root: it emits the C/C++/Rust
+# bindings from the registries the annotations above populate. No-op unless
+# built with -d:ffiGenBindings.
+genBindings()

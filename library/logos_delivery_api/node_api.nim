@@ -16,206 +16,129 @@ import
 proc `%`*(id: RequestId): JsonNode =
   %($id)
 
-registerReqFFI(CreateNodeRequest, ctx: ptr FFIContext[LogosDelivery]):
-  proc(configJson: cstring): Future[Result[string, string]] {.async.} =
-    let conf = parseLogosDeliveryConf($configJson).valueOr:
-      error "Failed to parse Logos Delivery configuration JSON",
-        error = error, configJson = $configJson
-      return err("failed parseLogosDeliveryConf " & error)
+proc logosdeliveryCreateNode*(
+    configJson: string
+): Future[Result[LogosDelivery, string]] {.ffiCtor.} =
+  let conf = parseLogosDeliveryConf(configJson).valueOr:
+    error "Failed to parse Logos Delivery configuration JSON",
+      error = error, configJson = configJson
+    return err("failed parseLogosDeliveryConf " & error)
 
-    ctx.myLib[] = (await LogosDelivery.new(conf)).valueOr:
-      let errMsg = $error
-      chronicles.error "CreateNodeRequest failed", err = errMsg
-      return err(errMsg)
+  return await LogosDelivery.new(conf)
 
-    return ok("")
-
-proc logosdelivery_destroy(
-    ctx: ptr FFIContext[LogosDelivery], callback: FFICallBack, userData: pointer
-): cint {.dynlib, exportc, cdecl.} =
-  initializeLibrary()
-  checkParams(ctx, callback, userData)
-
-  ffi.destroyFFIContext(ctx).isOkOr:
-    let msg = "liblogosdelivery error: " & $error
-    callback(RET_ERR, unsafeAddr msg[0], cast[csize_t](len(msg)), userData)
-    return RET_ERR
-
-  ## always need to invoke the callback although we don't retrieve value to the caller
-  callback(RET_OK, nil, 0, userData)
-
-  return RET_OK
-
-proc logosdelivery_create_node(
-    configJson: cstring, callback: FFICallback, userData: pointer
-): pointer {.dynlib, exportc, cdecl.} =
-  initializeLibrary()
-
-  if callback.isNil():
-    echo "error: missing callback in logosdelivery_create_node"
-    return nil
-
-  var ctx = ffi.createFFIContext[LogosDelivery]().valueOr:
-    let msg = "Error in createFFIContext: " & $error
-    callback(RET_ERR, unsafeAddr msg[0], cast[csize_t](len(msg)), userData)
-    return nil
-
-  ctx.userData = userData
-
-  ffi.sendRequestToFFIThread(
-    ctx, CreateNodeRequest.ffiNewReq(callback, userData, configJson)
-  ).isOkOr:
-    let msg = "error in sendRequestToFFIThread: " & $error
-    callback(RET_ERR, unsafeAddr msg[0], cast[csize_t](len(msg)), userData)
-    # free allocated resources as they won't be available
-    ffi.destroyFFIContext(ctx).isOkOr:
-      chronicles.error "Error in destroyFFIContext after sendRequestToFFIThread during creation",
-        err = $error
-    return nil
-
-  return ctx
-
-proc logosdelivery_start_node(
-    ctx: ptr FFIContext[LogosDelivery], callback: FFICallBack, userData: pointer
-) {.ffi.} =
-  requireInitializedNode(ctx, "START_NODE"):
-    return err(errMsg)
-
+proc logosdeliveryStartNode*(
+    lib: LogosDelivery
+): Future[Result[string, string]] {.ffi.} =
   # setting up outgoing event listeners
   let sentListener = MessageSentEvent.listen(
-    ctx.myLib[].waku.brokerCtx,
+    lib.waku.brokerCtx,
     proc(event: MessageSentEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onMessageSent"):
-        $newJsonEvent("message_sent", event),
+      emitMessageSent($event.requestId, event.messageHash),
   ).valueOr:
     chronicles.error "MessageSentEvent.listen failed", err = $error
     return err("MessageSentEvent.listen failed: " & $error)
 
   let errorListener = MessageErrorEvent.listen(
-    ctx.myLib[].waku.brokerCtx,
+    lib.waku.brokerCtx,
     proc(event: MessageErrorEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onMessageError"):
-        $newJsonEvent("message_error", event),
+      emitMessageError($event.requestId, event.messageHash, event.error),
   ).valueOr:
     chronicles.error "MessageErrorEvent.listen failed", err = $error
     return err("MessageErrorEvent.listen failed: " & $error)
 
   let propagatedListener = MessagePropagatedEvent.listen(
-    ctx.myLib[].waku.brokerCtx,
+    lib.waku.brokerCtx,
     proc(event: MessagePropagatedEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onMessagePropagated"):
-        $newJsonEvent("message_propagated", event),
+      emitMessagePropagated($event.requestId, event.messageHash),
   ).valueOr:
     chronicles.error "MessagePropagatedEvent.listen failed", err = $error
     return err("MessagePropagatedEvent.listen failed: " & $error)
 
   let receivedListener = MessageReceivedEvent.listen(
-    ctx.myLib[].waku.brokerCtx,
+    lib.waku.brokerCtx,
     proc(event: MessageReceivedEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onMessageReceived"):
-        $newJsonEvent("message_received", event),
+      emitMessageReceived(event.messageHash, event.message),
   ).valueOr:
     chronicles.error "MessageReceivedEvent.listen failed", err = $error
     return err("MessageReceivedEvent.listen failed: " & $error)
 
   let ConnectionStatusChangeListener = EventConnectionStatusChange.listen(
-    ctx.myLib[].waku.brokerCtx,
+    lib.waku.brokerCtx,
     proc(event: EventConnectionStatusChange) {.async: (raises: []).} =
-      callEventCallback(ctx, "onConnectionStatusChange"):
-        $newJsonEvent("connection_status_change", event),
+      emitConnectionStatusChange($event.connectionStatus),
   ).valueOr:
     chronicles.error "ConnectionStatusChange.listen failed", err = $error
     return err("ConnectionStatusChange.listen failed: " & $error)
 
   let shardTopicHealthListener = EventShardTopicHealthChange.listen(
-    ctx.myLib[].waku.brokerCtx,
+    lib.waku.brokerCtx,
     proc(event: EventShardTopicHealthChange) {.async: (raises: []).} =
-      callEventCallback(ctx, "onTopicHealthChange"):
-        $(
-          %*{
-            "eventType": "relay_topic_health_change",
-            "pubsubTopic": $event.topic,
-            "topicHealth": $event.health,
-          }
-        ),
+      emitTopicHealthChange($event.topic, $event.health),
   ).valueOr:
     chronicles.error "EventShardTopicHealthChange.listen failed", err = $error
     return err("EventShardTopicHealthChange.listen failed: " & $error)
 
   let peerEventListener = WakuPeerEvent.listen(
-    ctx.myLib[].waku.brokerCtx,
+    lib.waku.brokerCtx,
     proc(event: WakuPeerEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onConnectionChange"):
-        $(
-          %*{
-            "eventType": "connection_change",
-            "peerId": $event.peerId,
-            "peerEvent": $event.kind,
-          }
-        ),
+      emitConnectionChange($event.peerId, $event.kind),
   ).valueOr:
     chronicles.error "WakuPeerEvent.listen failed", err = $error
     return err("WakuPeerEvent.listen failed: " & $error)
 
   let channelReceivedListener = ChannelMessageReceivedEvent.listen(
-    ctx.myLib[].waku.brokerCtx,
+    lib.waku.brokerCtx,
     proc(event: ChannelMessageReceivedEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onChannelMessageReceived"):
-        $(
-          %*{
-            "eventType": "channel_message_received",
-            "channelId": string(event.channelId),
-            "senderId": $event.senderId,
-            "payload": string(base64.encode(event.payload)),
-          }
-        ),
+      emitChannelMessageReceived(
+        string(event.channelId), $event.senderId, event.payload
+      ),
   ).valueOr:
     chronicles.error "ChannelMessageReceivedEvent.listen failed", err = $error
     return err("ChannelMessageReceivedEvent.listen failed: " & $error)
 
   let channelSentListener = ChannelMessageSentEvent.listen(
-    ctx.myLib[].waku.brokerCtx,
+    lib.waku.brokerCtx,
     proc(event: ChannelMessageSentEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onChannelMessageSent"):
-        $newJsonEvent("channel_message_sent", event),
+      emitChannelMessageSent(string(event.channelId), $event.requestId),
   ).valueOr:
     chronicles.error "ChannelMessageSentEvent.listen failed", err = $error
     return err("ChannelMessageSentEvent.listen failed: " & $error)
 
   let channelErrorListener = ChannelMessageErrorEvent.listen(
-    ctx.myLib[].waku.brokerCtx,
+    lib.waku.brokerCtx,
     proc(event: ChannelMessageErrorEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onChannelMessageError"):
-        $newJsonEvent("channel_message_error", event),
+      emitChannelMessageError(
+        string(event.channelId), $event.requestId, event.error
+      ),
   ).valueOr:
     chronicles.error "ChannelMessageErrorEvent.listen failed", err = $error
     return err("ChannelMessageErrorEvent.listen failed: " & $error)
 
-  (await ctx.myLib[].start()).isOkOr:
+  (await lib.start()).isOkOr:
     let errMsg = $error
     chronicles.error "START_NODE failed", err = errMsg
     return err("failed to start: " & errMsg)
   return ok("")
 
-proc logosdelivery_stop_node(
-    ctx: ptr FFIContext[LogosDelivery], callback: FFICallBack, userData: pointer
-) {.ffi.} =
-  requireInitializedNode(ctx, "STOP_NODE"):
-    return err(errMsg)
+proc logosdeliveryStopNode*(
+    lib: LogosDelivery
+): Future[Result[string, string]] {.ffi.} =
+  await MessageErrorEvent.dropAllListeners(lib.waku.brokerCtx)
+  await MessageSentEvent.dropAllListeners(lib.waku.brokerCtx)
+  await MessagePropagatedEvent.dropAllListeners(lib.waku.brokerCtx)
+  await MessageReceivedEvent.dropAllListeners(lib.waku.brokerCtx)
+  await EventConnectionStatusChange.dropAllListeners(lib.waku.brokerCtx)
+  await EventShardTopicHealthChange.dropAllListeners(lib.waku.brokerCtx)
+  await WakuPeerEvent.dropAllListeners(lib.waku.brokerCtx)
+  await ChannelMessageReceivedEvent.dropAllListeners(lib.waku.brokerCtx)
+  await ChannelMessageSentEvent.dropAllListeners(lib.waku.brokerCtx)
+  await ChannelMessageErrorEvent.dropAllListeners(lib.waku.brokerCtx)
 
-  await MessageErrorEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await MessageSentEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await MessagePropagatedEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await MessageReceivedEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await EventConnectionStatusChange.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await EventShardTopicHealthChange.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await WakuPeerEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await ChannelMessageReceivedEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await ChannelMessageSentEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await ChannelMessageErrorEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-
-  (await ctx.myLib[].stop()).isOkOr:
+  (await lib.stop()).isOkOr:
     let errMsg = $error
     chronicles.error "STOP_NODE failed", err = errMsg
     return err("failed to stop: " & errMsg)
   return ok("")
+
+proc logosdeliveryDestroy*(lib: LogosDelivery) {.ffiDtor.} =
+  discard
