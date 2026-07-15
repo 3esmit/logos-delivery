@@ -68,7 +68,9 @@ proc setupSendProcessorChain(
 
   if isRelayAvail:
     let publishProc = waku.relayPushHandler()
-    processors.add(RelaySendProcessor.new(isLightPushAvail, publishProc, brokerCtx))
+    processors.add(
+      RelaySendProcessor.new(isLightPushAvail, publishProc, waku, brokerCtx)
+    )
   if isLightPushAvail:
     processors.add(LightpushSendProcessor.new(waku, brokerCtx))
 
