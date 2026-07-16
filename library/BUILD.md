@@ -63,12 +63,19 @@ build/
 
 ## Library Headers
 
-The C API is tiered across two headers (one library, two stability promises):
-- `library/liblogosdelivery.h` - stable, supported Messaging / Reliable
-  Channels API. This is the front door for consumers.
-- `library/liblogosdelivery_kernel.h` - advanced, low-level kernel API
-  (`waku_*`). "Use at your own risk", may change at any time. Including it is
-  a deliberate opt-in; it pulls in `liblogosdelivery.h` for shared types.
+The C header is generated from the Nim source by nim-ffi, not hand-written:
+
+    nimble liblogosdeliveryGenBindingsC
+
+This emits `library/c_bindings/`:
+- `logosdelivery.h` - the full C API (Messaging, Reliable Channels and the
+  low-level `waku_*` kernel procs, in one file).
+- `nim_ffi_cbor.h` / `nim_ffi_prelude.h` - request/response payloads cross the
+  boundary as CBOR blobs (the library's default ABI), and these helpers encode
+  and decode them. `logosdelivery.h` includes them.
+
+Regenerate whenever the `{.ffi.}` surface changes; the checked-in copy must
+match the Nim source.
 
 ## Troubleshooting
 

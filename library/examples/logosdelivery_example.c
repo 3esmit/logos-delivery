@@ -1,3 +1,8 @@
+/* NOTE: This example targets the pre-CBOR string ABI and the removed
+ * hand-written headers. The FFI now generates its C header
+ * (library/c_bindings/logosdelivery.h) and passes requests as CBOR blobs, so
+ * this example no longer compiles as-is; it awaits a port to the generated
+ * CBOR ABI. See library/BUILD.md. */
 #include "../liblogosdelivery.h"
 #include "json_utils.h"
 #include <stdio.h>

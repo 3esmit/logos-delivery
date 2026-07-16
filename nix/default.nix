@@ -139,8 +139,9 @@ pkgs.stdenv.mkDerivation {
     mkdir -p $out/lib $out/include
     cp build/liblogosdelivery.${libExt} $out/lib/ 2>/dev/null || true
     cp build/liblogosdelivery.a         $out/lib/ 2>/dev/null || true
-    cp library/liblogosdelivery.h        $out/include/ 2>/dev/null || true
-    cp library/liblogosdelivery_kernel.h $out/include/ 2>/dev/null || true
+    cp library/c_bindings/logosdelivery.h    $out/include/ 2>/dev/null || true
+    cp library/c_bindings/nim_ffi_cbor.h     $out/include/ 2>/dev/null || true
+    cp library/c_bindings/nim_ffi_prelude.h  $out/include/ 2>/dev/null || true
     runHook postInstall
   '';
 

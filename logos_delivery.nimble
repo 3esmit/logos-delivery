@@ -512,6 +512,15 @@ task liblogosdeliveryGenBindingsRust, "Emit the Rust bindings for liblogosdelive
     "-d:ffiSrcPath=library/liblogosdelivery.nim " & getMyCPU() & getNimParams() &
     " --compileOnly library/liblogosdelivery.nim"
 
+task liblogosdeliveryGenBindingsC, "Emit the C header for liblogosdelivery":
+  # Replaces the hand-written liblogosdelivery.h; params ride as CBOR blobs
+  # (the library's default ABI), so the emitted nim_ffi_cbor.h helpers marshal
+  # them. --compileOnly for the same reason as the Rust task.
+  exec "nim c --threads:on --mm:refc --skipParentCfg:off -d:discv5_protocol_id=d5waku " &
+    "-d:ffiGenBindings -d:targetLang=c -d:ffiOutputDir=library/c_bindings " &
+    "-d:ffiSrcPath=library/liblogosdelivery.nim " & getMyCPU() & getNimParams() &
+    " --compileOnly library/liblogosdelivery.nim"
+
 ### Formatting tasks
 
 task nphchanges, "Run nph on .nim/.nims/.nimble files changed on this branch/PR":
