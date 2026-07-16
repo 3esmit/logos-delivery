@@ -22,13 +22,7 @@ suite "RLN RateLimitProof codec":
     check decoded.isOk()
     let d = decoded.get()
     check:
-      d.proof == proof.proof
-      d.merkleRoot == proof.merkleRoot
-      d.epoch == proof.epoch
-      d.shareX == proof.shareX
-      d.shareY == proof.shareY
-      d.nullifier == proof.nullifier
-      d.rlnIdentifier == proof.rlnIdentifier
+      d == proof
       # re-encoding the decoded proof yields identical bytes
       d.encode() == encoded
 

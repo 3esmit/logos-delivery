@@ -28,10 +28,7 @@ suite "Waku Lightpush v3 - codec wire format":
     )
     let decoded = LightPushResponse.decode(resp.encode())
     check decoded.isOk()
-    check decoded.get().requestId == resp.requestId
-    check decoded.get().statusCode == resp.statusCode
-    check decoded.get().statusDesc == resp.statusDesc
-    check decoded.get().relayPeerCount == resp.relayPeerCount
+    check decoded.get() == resp
 
   test "LightpushRequest round-trips with nested WakuMessage":
     let req = LightpushRequest(
@@ -41,6 +38,4 @@ suite "Waku Lightpush v3 - codec wire format":
     )
     let decoded = LightpushRequest.decode(req.encode())
     check decoded.isOk()
-    check decoded.get().requestId == req.requestId
-    check decoded.get().pubSubTopic == req.pubSubTopic
-    check decoded.get().message == req.message
+    check decoded.get() == req

@@ -19,8 +19,7 @@ suite "Waku Filter v2 - codec wire format":
   test "decode of a request omitting field 2 defaults to SUBSCRIBER_PING":
     let decoded = FilterSubscribeRequest.decode(PingRequestNoType)
     check decoded.isOk()
-    check decoded.get().requestId == "x"
-    check decoded.get().filterSubscribeType == FilterSubscribeType.SUBSCRIBER_PING
+    check decoded.get() == FilterSubscribeRequest.ping("x")
 
   test "FilterSubscribeRequest round-trips (subscribe with topics)":
     let req = FilterSubscribeRequest.subscribe(
