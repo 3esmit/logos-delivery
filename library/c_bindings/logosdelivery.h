@@ -63,6 +63,15 @@ typedef struct {
     WakuMessagePayload wakuMessage;
 } ReceivedMessagePayload;
 typedef struct {
+    NimFfiStr contentTopic;
+    NimFfiStr payload;
+    bool ephemeral;
+} SendRequest;
+typedef struct {
+    NimFfiStr payload;
+    bool ephemeral;
+} ChannelSendRequest;
+typedef struct {
     NimFfiStr configJson;
 } LogosdeliveryCreateNodeCtorReq;
 typedef struct {
@@ -78,7 +87,7 @@ typedef struct {
     NimFfiStr contentTopicStr;
 } LogosdeliveryUnsubscribeReq;
 typedef struct {
-    NimFfiStr messageJson;
+    SendRequest req;
 } LogosdeliverySendReq;
 typedef struct {
     char _nimffi_empty; /* C forbids empty structs */
@@ -228,7 +237,7 @@ typedef struct {
 } LogosdeliveryChannelCreateReq;
 typedef struct {
     NimFfiStr channelIdStr;
-    NimFfiStr messageJson;
+    ChannelSendRequest req;
 } LogosdeliveryChannelSendReq;
 typedef struct {
     NimFfiStr channelIdStr;
@@ -755,6 +764,88 @@ static inline void logosdelivery_free_ReceivedMessagePayload(ReceivedMessagePayl
     nimffi_free_str(&v->messageHash);
     logosdelivery_free_WakuMessagePayload(&v->wakuMessage);
 }
+static inline CborError logosdelivery_enc_SendRequest(
+        CborEncoder* e, const SendRequest* v) {
+    CborEncoder m;
+    CborError err = cbor_encoder_create_map(e, &m, 3);
+    if (err) return err;
+    err = cbor_encode_text_stringz(&m, "contentTopic");
+    if (err) return err;
+    err = nimffi_enc_str(&m, &v->contentTopic);
+    if (err) return err;
+    err = cbor_encode_text_stringz(&m, "payload");
+    if (err) return err;
+    err = nimffi_enc_str(&m, &v->payload);
+    if (err) return err;
+    err = cbor_encode_text_stringz(&m, "ephemeral");
+    if (err) return err;
+    err = nimffi_enc_bool(&m, &v->ephemeral);
+    if (err) return err;
+    return cbor_encoder_close_container(e, &m);
+}
+static inline CborError logosdelivery_dec_SendRequest(
+        CborValue* it, SendRequest* out) {
+    if (!cbor_value_is_map(it)) return CborErrorImproperValue;
+    CborValue field;
+    CborError err;
+    err = cbor_value_map_find_value(it, "contentTopic", &field);
+    if (err) return err;
+    if (!cbor_value_is_valid(&field)) return CborErrorImproperValue;
+    err = nimffi_dec_str(&field, &out->contentTopic);
+    if (err) return err;
+    err = cbor_value_map_find_value(it, "payload", &field);
+    if (err) return err;
+    if (!cbor_value_is_valid(&field)) return CborErrorImproperValue;
+    err = nimffi_dec_str(&field, &out->payload);
+    if (err) return err;
+    err = cbor_value_map_find_value(it, "ephemeral", &field);
+    if (err) return err;
+    if (!cbor_value_is_valid(&field)) return CborErrorImproperValue;
+    err = nimffi_dec_bool(&field, &out->ephemeral);
+    if (err) return err;
+    return cbor_value_advance(it);
+}
+static inline void logosdelivery_free_SendRequest(SendRequest* v) {
+    if (!v) return;
+    nimffi_free_str(&v->contentTopic);
+    nimffi_free_str(&v->payload);
+}
+static inline CborError logosdelivery_enc_ChannelSendRequest(
+        CborEncoder* e, const ChannelSendRequest* v) {
+    CborEncoder m;
+    CborError err = cbor_encoder_create_map(e, &m, 2);
+    if (err) return err;
+    err = cbor_encode_text_stringz(&m, "payload");
+    if (err) return err;
+    err = nimffi_enc_str(&m, &v->payload);
+    if (err) return err;
+    err = cbor_encode_text_stringz(&m, "ephemeral");
+    if (err) return err;
+    err = nimffi_enc_bool(&m, &v->ephemeral);
+    if (err) return err;
+    return cbor_encoder_close_container(e, &m);
+}
+static inline CborError logosdelivery_dec_ChannelSendRequest(
+        CborValue* it, ChannelSendRequest* out) {
+    if (!cbor_value_is_map(it)) return CborErrorImproperValue;
+    CborValue field;
+    CborError err;
+    err = cbor_value_map_find_value(it, "payload", &field);
+    if (err) return err;
+    if (!cbor_value_is_valid(&field)) return CborErrorImproperValue;
+    err = nimffi_dec_str(&field, &out->payload);
+    if (err) return err;
+    err = cbor_value_map_find_value(it, "ephemeral", &field);
+    if (err) return err;
+    if (!cbor_value_is_valid(&field)) return CborErrorImproperValue;
+    err = nimffi_dec_bool(&field, &out->ephemeral);
+    if (err) return err;
+    return cbor_value_advance(it);
+}
+static inline void logosdelivery_free_ChannelSendRequest(ChannelSendRequest* v) {
+    if (!v) return;
+    nimffi_free_str(&v->payload);
+}
 static inline CborError logosdelivery_enc_LogosdeliveryCreateNodeCtorReq(
         CborEncoder* e, const LogosdeliveryCreateNodeCtorReq* v) {
     CborEncoder m;
@@ -869,9 +960,9 @@ static inline CborError logosdelivery_enc_LogosdeliverySendReq(
     CborEncoder m;
     CborError err = cbor_encoder_create_map(e, &m, 1);
     if (err) return err;
-    err = cbor_encode_text_stringz(&m, "messageJson");
+    err = cbor_encode_text_stringz(&m, "req");
     if (err) return err;
-    err = nimffi_enc_str(&m, &v->messageJson);
+    err = logosdelivery_enc_SendRequest(&m, &v->req);
     if (err) return err;
     return cbor_encoder_close_container(e, &m);
 }
@@ -880,16 +971,16 @@ static inline CborError logosdelivery_dec_LogosdeliverySendReq(
     if (!cbor_value_is_map(it)) return CborErrorImproperValue;
     CborValue field;
     CborError err;
-    err = cbor_value_map_find_value(it, "messageJson", &field);
+    err = cbor_value_map_find_value(it, "req", &field);
     if (err) return err;
     if (!cbor_value_is_valid(&field)) return CborErrorImproperValue;
-    err = nimffi_dec_str(&field, &out->messageJson);
+    err = logosdelivery_dec_SendRequest(&field, &out->req);
     if (err) return err;
     return cbor_value_advance(it);
 }
 static inline void logosdelivery_free_LogosdeliverySendReq(LogosdeliverySendReq* v) {
     if (!v) return;
-    nimffi_free_str(&v->messageJson);
+    logosdelivery_free_SendRequest(&v->req);
 }
 static inline CborError logosdelivery_enc_LogosdeliveryGetAvailableNodeInfoIdsReq(
         CborEncoder* e, const LogosdeliveryGetAvailableNodeInfoIdsReq* v) {
@@ -2015,9 +2106,9 @@ static inline CborError logosdelivery_enc_LogosdeliveryChannelSendReq(
     if (err) return err;
     err = nimffi_enc_str(&m, &v->channelIdStr);
     if (err) return err;
-    err = cbor_encode_text_stringz(&m, "messageJson");
+    err = cbor_encode_text_stringz(&m, "req");
     if (err) return err;
-    err = nimffi_enc_str(&m, &v->messageJson);
+    err = logosdelivery_enc_ChannelSendRequest(&m, &v->req);
     if (err) return err;
     return cbor_encoder_close_container(e, &m);
 }
@@ -2031,17 +2122,17 @@ static inline CborError logosdelivery_dec_LogosdeliveryChannelSendReq(
     if (!cbor_value_is_valid(&field)) return CborErrorImproperValue;
     err = nimffi_dec_str(&field, &out->channelIdStr);
     if (err) return err;
-    err = cbor_value_map_find_value(it, "messageJson", &field);
+    err = cbor_value_map_find_value(it, "req", &field);
     if (err) return err;
     if (!cbor_value_is_valid(&field)) return CborErrorImproperValue;
-    err = nimffi_dec_str(&field, &out->messageJson);
+    err = logosdelivery_dec_ChannelSendRequest(&field, &out->req);
     if (err) return err;
     return cbor_value_advance(it);
 }
 static inline void logosdelivery_free_LogosdeliveryChannelSendReq(LogosdeliveryChannelSendReq* v) {
     if (!v) return;
     nimffi_free_str(&v->channelIdStr);
-    nimffi_free_str(&v->messageJson);
+    logosdelivery_free_ChannelSendRequest(&v->req);
 }
 static inline CborError logosdelivery_enc_LogosdeliveryChannelCloseReq(
         CborEncoder* e, const LogosdeliveryChannelCloseReq* v) {
@@ -3003,10 +3094,10 @@ static void logosdelivery_send_reply_trampoline(int ret, const char* msg, size_t
     nimffi_free_str(&out);
     free(box);
 }
-static inline int logosdelivery_ctx_send(const LogosDeliveryCtx* ctx, NimFfiStr messageJson, LogosDeliverySendReplyFn on_reply, void* user_data) {
+static inline int logosdelivery_ctx_send(const LogosDeliveryCtx* ctx, const SendRequest* req, LogosDeliverySendReplyFn on_reply, void* user_data) {
     LogosdeliverySendReq ffi_req;
     memset(&ffi_req, 0, sizeof(ffi_req));
-    ffi_req.messageJson = messageJson;
+    ffi_req.req = *req;
     uint8_t* req_buf = NULL;
     size_t req_len = 0;
     char* err = NULL;
@@ -5614,11 +5705,11 @@ static void logosdelivery_channel_send_reply_trampoline(int ret, const char* msg
     nimffi_free_str(&out);
     free(box);
 }
-static inline int logosdelivery_ctx_channel_send(const LogosDeliveryCtx* ctx, NimFfiStr channelIdStr, NimFfiStr messageJson, LogosDeliveryChannelSendReplyFn on_reply, void* user_data) {
+static inline int logosdelivery_ctx_channel_send(const LogosDeliveryCtx* ctx, NimFfiStr channelIdStr, const ChannelSendRequest* req, LogosDeliveryChannelSendReplyFn on_reply, void* user_data) {
     LogosdeliveryChannelSendReq ffi_req;
     memset(&ffi_req, 0, sizeof(ffi_req));
     ffi_req.channelIdStr = channelIdStr;
-    ffi_req.messageJson = messageJson;
+    ffi_req.req = *req;
     uint8_t* req_buf = NULL;
     size_t req_len = 0;
     char* err = NULL;

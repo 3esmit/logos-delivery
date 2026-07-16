@@ -1,12 +1,21 @@
-import std/[json]
 import chronos, results, ffi
-import stew/byteutils
 import
   logos_delivery/waku/common/base64,
   logos_delivery/waku/waku,
   logos_delivery/waku/waku_core/topics/content_topic,
   logos_delivery/api/types,
   ../declare_lib
+
+# A typed CBOR request rather than a JSON blob the proc has to parse. Fields are
+# unexported: genBindings copies field names verbatim, so an export marker would
+# leak into the generated Rust as `pub payload*`; the proc reads them from this
+# same module. `payload` is base64 because nim-ffi's Rust codegen emits seq[byte]
+# as Vec<u8> without the serde_bytes annotation CBOR byte strings need, so native
+# bytes do not round-trip yet -- a base64 string value does.
+type SendRequest* {.ffi.} = object
+  contentTopic: string
+  payload: string
+  ephemeral: bool
 
 proc logosdeliverySubscribe*(
     lib: LogosDelivery, contentTopicStr: string
@@ -39,39 +48,18 @@ proc logosdeliveryUnsubscribe*(
   return ok("")
 
 proc logosdeliverySend*(
-    lib: LogosDelivery, messageJson: string
+    lib: LogosDelivery, req: SendRequest
 ): Future[Result[string, string]] {.ffi.} =
   requireMessaging(lib, "Send"):
     return err(errMsg)
 
-  ## Parse the message JSON and send the message
-  var jsonNode: JsonNode
-  try:
-    jsonNode = parseJson(messageJson)
-  except Exception as e:
-    return err("Failed to parse message JSON: " & e.msg)
-
-  # Extract content topic
-  if not jsonNode.hasKey("contentTopic"):
-    return err("Missing contentTopic field")
-
-  # ContentTopic is just a string type alias
-  let contentTopic = ContentTopic(jsonNode["contentTopic"].getStr())
-
-  # Extract payload (expect base64 encoded string)
-  if not jsonNode.hasKey("payload"):
-    return err("Missing payload field")
-
-  let payloadStr = jsonNode["payload"].getStr()
-  let payload = base64.decode(Base64String(payloadStr)).valueOr:
+  let payload = base64.decode(Base64String(req.payload)).valueOr:
     return err("invalid payload format: " & error)
 
-  # Extract ephemeral flag
-  let ephemeral = jsonNode.getOrDefault("ephemeral").getBool(false)
-
-  # Create message envelope
   let envelope = MessageEnvelope.init(
-    contentTopic = contentTopic, payload = payload, ephemeral = ephemeral
+    contentTopic = ContentTopic(req.contentTopic),
+    payload = payload,
+    ephemeral = req.ephemeral,
   )
 
   # Send the message via the messaging layer's own API.

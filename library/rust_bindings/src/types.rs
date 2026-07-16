@@ -103,6 +103,20 @@ pub struct ReceivedMessagePayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendRequest {
+    #[serde(rename = "contentTopic")]
+    pub content_topic: String,
+    pub payload: String,
+    pub ephemeral: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelSendRequest {
+    pub payload: String,
+    pub ephemeral: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogosdeliveryCreateNodeCtorReq {
     #[serde(rename = "configJson")]
     pub config_json: String,
@@ -128,8 +142,7 @@ pub struct LogosdeliveryUnsubscribeReq {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogosdeliverySendReq {
-    #[serde(rename = "messageJson")]
-    pub message_json: String,
+    pub req: SendRequest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -375,8 +388,7 @@ pub struct LogosdeliveryChannelCreateReq {
 pub struct LogosdeliveryChannelSendReq {
     #[serde(rename = "channelIdStr")]
     pub channel_id_str: String,
-    #[serde(rename = "messageJson")]
-    pub message_json: String,
+    pub req: ChannelSendRequest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

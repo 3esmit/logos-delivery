@@ -1,4 +1,3 @@
-import std/json
 import chronos, results, ffi
 import
   logos_delivery/waku/common/base64,
@@ -7,6 +6,12 @@ import
   logos_delivery/waku/waku_core/topics/content_topic,
   logos_delivery/api/types,
   ../declare_lib
+
+# Typed CBOR request; `payload` is base64 for the same reason as SendRequest in
+# messaging_api. Fields unexported to keep the export marker out of the bindings.
+type ChannelSendRequest* {.ffi.} = object
+  payload: string
+  ephemeral: bool
 
 proc installEncryption(mechanism: string): Result[void, string] =
   ## The Encrypt/Decrypt brokers dispatch to a single provider, so this installs
@@ -43,28 +48,18 @@ proc logosdeliveryChannelCreate*(
   return ok(string(id))
 
 proc logosdeliveryChannelSend*(
-    lib: LogosDelivery, channelIdStr: string, messageJson: string
+    lib: LogosDelivery, channelIdStr: string, req: ChannelSendRequest
 ): Future[Result[string, string]] {.ffi.} =
-  ## `messageJson` carries `{ "payload": <base64>, "ephemeral": <bool> }`.
   requireChannels(lib, "ChannelSend"):
     return err(errMsg)
 
-  var jsonNode: JsonNode
-  try:
-    jsonNode = parseJson(messageJson)
-  except Exception as e:
-    return err("Failed to parse channel message JSON: " & e.msg)
-
-  if not jsonNode.hasKey("payload"):
-    return err("Missing payload field")
-
-  let payload = base64.decode(Base64String(jsonNode["payload"].getStr())).valueOr:
+  let payload = base64.decode(Base64String(req.payload)).valueOr:
     return err("invalid payload format: " & error)
 
-  let ephemeral = jsonNode.getOrDefault("ephemeral").getBool(false)
-
   let requestId = (
-    await lib.reliableChannelManager.send(ChannelId(channelIdStr), payload, ephemeral)
+    await lib.reliableChannelManager.send(
+      ChannelId(channelIdStr), payload, req.ephemeral
+    )
   ).valueOr:
     return err("ChannelSend failed: " & $error)
 
