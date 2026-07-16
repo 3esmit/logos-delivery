@@ -1384,6 +1384,25 @@ impl LogosDeliveryCtx {
         decode_cbor::<String>(&raw_bytes)
     }
 
+    pub fn channel_exists(&self, channel_id_str: String) -> Result<bool, String> {
+        let req = LogosdeliveryChannelExistsReq { channel_id_str };
+        let req_bytes = encode_cbor(&req)?;
+        let raw_bytes = ffi_call_sync(self.timeout, |cb, ud| unsafe {
+            ffi::logosdelivery_channel_exists(self.ptr, cb, ud, req_bytes.as_ptr(), req_bytes.len())
+        })?;
+        decode_cbor::<bool>(&raw_bytes)
+    }
+
+    pub async fn channel_exists_async(&self, channel_id_str: String) -> Result<bool, String> {
+        let req = LogosdeliveryChannelExistsReq { channel_id_str };
+        let req_bytes = encode_cbor(&req)?;
+        let ptr = self.ptr as usize;
+        let raw_bytes = ffi_call_async(self.timeout, move |cb, ud| unsafe {
+            ffi::logosdelivery_channel_exists(ptr as *mut c_void, cb, ud, req_bytes.as_ptr(), req_bytes.len())
+        }).await?;
+        decode_cbor::<bool>(&raw_bytes)
+    }
+
     pub fn channel_send(&self, channel_id_str: String, req: ChannelSendRequest) -> Result<String, String> {
         let req = LogosdeliveryChannelSendReq { channel_id_str, req };
         let req_bytes = encode_cbor(&req)?;

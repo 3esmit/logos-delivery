@@ -47,6 +47,16 @@ proc logosdeliveryChannelCreate*(
 
   return ok(string(id))
 
+proc logosdeliveryChannelExists*(
+    lib: LogosDelivery, channelIdStr: string
+): Future[Result[bool, string]] {.ffi.} =
+  ## Whether the channel is currently held by the manager, i.e. between a
+  ## successful create and close. A missing channel is `false`, not an error.
+  requireChannels(lib, "ChannelExists"):
+    return err(errMsg)
+
+  return ok(lib.reliableChannelManager.channelExists(ChannelId(channelIdStr)))
+
 proc logosdeliveryChannelSend*(
     lib: LogosDelivery, channelIdStr: string, req: ChannelSendRequest
 ): Future[Result[string, string]] {.ffi.} =

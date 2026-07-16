@@ -385,6 +385,12 @@ pub struct LogosdeliveryChannelCreateReq {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogosdeliveryChannelExistsReq {
+    #[serde(rename = "channelIdStr")]
+    pub channel_id_str: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogosdeliveryChannelSendReq {
     #[serde(rename = "channelIdStr")]
     pub channel_id_str: String,
