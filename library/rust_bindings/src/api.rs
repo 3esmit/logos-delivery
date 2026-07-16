@@ -1365,8 +1365,8 @@ impl LogosDeliveryCtx {
         decode_cbor::<String>(&raw_bytes)
     }
 
-    pub fn channel_create(&self, channel_id_str: String, content_topic_str: String, sender_id_str: String) -> Result<String, String> {
-        let req = LogosdeliveryChannelCreateReq { channel_id_str, content_topic_str, sender_id_str };
+    pub fn channel_create(&self, channel_id_str: String, content_topic_str: String, sender_id_str: String, encryption_str: String) -> Result<String, String> {
+        let req = LogosdeliveryChannelCreateReq { channel_id_str, content_topic_str, sender_id_str, encryption_str };
         let req_bytes = encode_cbor(&req)?;
         let raw_bytes = ffi_call_sync(self.timeout, |cb, ud| unsafe {
             ffi::logosdelivery_channel_create(self.ptr, cb, ud, req_bytes.as_ptr(), req_bytes.len())
@@ -1374,8 +1374,8 @@ impl LogosDeliveryCtx {
         decode_cbor::<String>(&raw_bytes)
     }
 
-    pub async fn channel_create_async(&self, channel_id_str: String, content_topic_str: String, sender_id_str: String) -> Result<String, String> {
-        let req = LogosdeliveryChannelCreateReq { channel_id_str, content_topic_str, sender_id_str };
+    pub async fn channel_create_async(&self, channel_id_str: String, content_topic_str: String, sender_id_str: String, encryption_str: String) -> Result<String, String> {
+        let req = LogosdeliveryChannelCreateReq { channel_id_str, content_topic_str, sender_id_str, encryption_str };
         let req_bytes = encode_cbor(&req)?;
         let ptr = self.ptr as usize;
         let raw_bytes = ffi_call_async(self.timeout, move |cb, ud| unsafe {

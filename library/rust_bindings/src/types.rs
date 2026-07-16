@@ -367,6 +367,8 @@ pub struct LogosdeliveryChannelCreateReq {
     pub content_topic_str: String,
     #[serde(rename = "senderIdStr")]
     pub sender_id_str: String,
+    #[serde(rename = "encryptionStr")]
+    pub encryption_str: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

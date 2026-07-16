@@ -3,18 +3,35 @@ import chronos, results, ffi
 import
   logos_delivery/waku/common/base64,
   logos_delivery,
+  logos_delivery/channels/encryption/noop_encryption,
   logos_delivery/waku/waku_core/topics/content_topic,
   logos_delivery/api/types,
   ../declare_lib
+
+proc installEncryption(mechanism: string): Result[void, string] =
+  ## The Encrypt/Decrypt brokers dispatch to a single provider, so this installs
+  ## it process-wide even though the mechanism is named per channel: channels
+  ## created with different mechanisms would fight over it, last one winning.
+  ## Traffic cannot flow until some provider is registered.
+  case mechanism
+  of "noop":
+    setNoopEncryption()
+    ok()
+  else:
+    err("unknown encryption mechanism '" & mechanism & "'; supported: noop")
 
 proc logosdeliveryChannelCreate*(
     lib: LogosDelivery,
     channelIdStr: string,
     contentTopicStr: string,
     senderIdStr: string,
+    encryptionStr: string,
 ): Future[Result[string, string]] {.ffi.} =
   requireChannels(lib, "ChannelCreate"):
     return err(errMsg)
+
+  installEncryption(encryptionStr).isOkOr:
+    return err("ChannelCreate failed: " & error)
 
   let id = lib.reliableChannelManager.createReliableChannel(
     ChannelId(channelIdStr),
