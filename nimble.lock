@@ -264,18 +264,20 @@
       }
     },
     "cbor_serialization": {
-      "version": "0.3.0",
-      "vcsRevision": "1664160e04d153573373afddc552b9cbf6fbe4dc",
+      "version": "0.4.0",
+      "vcsRevision": "bd367543e89929570c2c40cc760588b96d988815",
       "url": "https://github.com/vacp2p/nim-cbor-serialization",
       "downloadMethod": "git",
       "dependencies": [
         "nim",
         "serialization",
         "stew",
-        "results"
+        "npeg",
+        "results",
+        "unittest2"
       ],
       "checksums": {
-        "sha1": "ab126eae09a6e39c72972a6a0b83cb06a2ffe8f0"
+        "sha1": "718496359dd4f45fcf105264c3c03b961b4a5ada"
       }
     },
     "json_serialization": {
