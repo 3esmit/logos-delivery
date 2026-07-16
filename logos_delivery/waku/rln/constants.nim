@@ -14,13 +14,21 @@ const RlnContractRootCacheSize* = 5
 # Using Linea block generation time as reference, which is around 2 seconds
 const RootsRefreshMinInterval* = 2.seconds
 
-# Minimum time between two consecutive merkle proof path freshness checks.
-# Bounds how often the publish path queries chain when generating proofs at a high rate.
-# Using Linea block generation time ~2s and AcceptableRootWindowSize=50, we give a generous safety margin within this
-const PathCheckMinInterval* = 30.seconds
-
 # RLN membership key and index files path
 const RlnCredentialsFilename* = "rlnCredentials.txt"
+
+# RLN Validator message rejection Error string, is used to trigger proof refresh and publish retry in the lightpush client
+const RlnValidatorErrorMsg* = "RLN validation failed"
+
+# OUT_OF_RLN_PROOF description marker telling callers a background refresh was
+# scheduled and retrying the publish is worthwhile.
+const RlnProofRefreshScheduledMsg* =
+  "stale RLN proof suspected; refresh scheduled, retry the publish"
+
+# Bounds the legacy lightpush merkle proof refresh (eth_call refetch + proof
+# regen) so a hanging RPC cannot stall the caller. The retried publish is not
+# bounded.
+const RlnMerkleProofRefreshTimeout* = 5.seconds
 
 # inputs of the membership contract constructor
 # TODO may be able to make these constants private and put them inside the waku_rln_utils

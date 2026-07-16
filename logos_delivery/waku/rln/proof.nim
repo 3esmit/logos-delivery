@@ -64,9 +64,43 @@ proc generateRLNProof*(
     return err("could not generate rln-v2 proof: " & $error)
   return ok(proof.encode().buffer)
 
+proc generateRLNProofWithRootRefresh*(
+    rln: Rln, input: seq[byte], senderEpochTime: float64
+): Future[Result[seq[byte], string]] {.async.} =
+  ## Generates an RLN proof and checks its merkle root against the
+  ## acceptable-root window. If the root is stale, invalidates the cache and
+  ## regenerates once against a refetched path. Returns the proof bytes.
+  let proofBytes = (await rln.generateRLNProof(input, senderEpochTime)).valueOr:
+    return err("failed to generate RLN proof: " & $error)
+
+  let rlnProof = RateLimitProof.init(proofBytes).valueOr:
+    return err("could not decode proof for root check: " & $error)
+
+  if await rln.groupManager.validateRoot(rlnProof.merkleRoot):
+    return ok(proofBytes)
+
+  info "RLN: stale merkle root detected; refreshing merkle path and regenerating proof"
+  rln.groupManager.invalidateMerkleProofCache()
+  return await rln.generateRLNProof(input, senderEpochTime)
+
+proc attachRLNProof*(
+    r: Rln, message: WakuMessage
+): Future[Result[WakuMessage, string]] {.async.} =
+  ## Returns the message with a freshly generated RLN proof, replacing any
+  ## existing one and drawing a new message id. Retry paths suspecting a stale
+  ## path should call `invalidateMerkleProofCache` first.
+  var msgWithProof = message
+  msgWithProof.proof = (
+    await r.generateRLNProof(message.toRLNSignal(), float64(getTime().toUnix()))
+  ).valueOr:
+    return err("error in attachRLNProof: " & error)
+  return ok(msgWithProof)
+
 proc checkAndGenerateRLNProof*(
     rln: Option[Rln], message: WakuMessage
 ): Future[Result[WakuMessage, string]] {.async.} =
+  ## Returns the message with an attached RLN proof, or unchanged when it
+  ## already carries a proof or RLN is not configured.
   if message.proof.len > 0:
     return ok(message)
 
@@ -74,12 +108,4 @@ proc checkAndGenerateRLNProof*(
     notice "Publishing message without RLN proof"
     return ok(message)
 
-  let
-    time = getTime().toUnix()
-    senderEpochTime = float64(time)
-  var msgWithProof = message
-  msgWithProof.proof = (
-    await rln.get().generateRLNProof(msgWithProof.toRLNSignal(), senderEpochTime)
-  ).valueOr:
-    return err("error in checkAndGenerateRLNProof: " & $error)
-  return ok(msgWithProof)
+  return await attachRLNProof(rln.get(), message)
