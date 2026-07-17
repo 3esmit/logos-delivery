@@ -155,17 +155,21 @@ proc preProcessPayload(self: SyncReconciliation, payload: RangesData): Opt[Range
       elif rangeType == RangeType.ItemSet:
         payload.itemSets.delete(0)
     else:
-      # This range straddles our window's lower bound: mark the portion below
-      # our window as skip so a peer with a wider window does not reconcile
-      # (and offer us) messages older than we retain. Only triggers on a
-      # window mismatch; equal windows never straddle.
+      # If the remote is reconciling a wider window than ours, clamp the
+      # bottom of this range to our window's width so a wider-window peer
+      # (e.g. a store node) does not offer us history older than we retain.
+      # We compare range WIDTH to our syncRange rather than absolute floors:
+      # width is independent of each peer's now(), so equal-window syncs
+      # (e.g. store<->store) never clamp, avoiding clock-skew false positives.
       let lowerBound = payload.ranges[i][0].a.time
-      if lowerBound < selfLowerBound:
-        let clampId = SyncID(time: selfLowerBound, hash: EmptyFingerprint)
+      let myRange = self.syncRange.nanos
+      if upperBound - lowerBound > myRange:
+        let clampTime = upperBound - myRange
+        let clampId = SyncID(time: clampTime, hash: EmptyFingerprint)
         let belowSkip = (payload.ranges[i][0].a .. clampId, RangeType.Skip)
 
         if rangeType == RangeType.ItemSet:
-          payload.itemSets[0].elements.keepItIf(it.time >= selfLowerBound)
+          payload.itemSets[0].elements.keepItIf(it.time >= clampTime)
 
         payload.ranges[i][0].a = clampId
         payload.ranges.insert(belowSkip, i)

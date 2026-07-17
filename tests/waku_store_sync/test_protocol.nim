@@ -198,6 +198,32 @@ suite "Waku Sync: reconciliation":
       # the old, below-window message is clamped out, never offered
       remoteNeeds.contains((serverPeerInfo.peerId, oldHash)) == false
 
+  asyncTest "equal-window peers reconcile a message near the window floor":
+    ## Guard for the clamp: two peers with the SAME sync range must not clamp
+    ## each other (the clamp compares range width to our window, not absolute
+    ## floors, so peer clock skew never triggers it), so a message near the
+    ## bottom of the shared window is still reconciled.
+    const equalRange = 1.hours
+
+    server = await newTestWakuRecon(
+      serverSwitch, @[], @[], equalRange, idsChannel, localWants, remoteNeeds
+    )
+    client = await newTestWakuRecon(
+      clientSwitch, @[], @[], equalRange, idsChannel, localWants, remoteNeeds
+    )
+
+    let
+      nearFloorTs = now() - 3_300_000_000_000 # 55 min ago: in-window, near floor
+      msg = fakeWakuMessage(ts = nearFloorTs, contentTopic = DefaultContentTopic)
+      hash = computeMessageHash(DefaultPubsubTopic, msg)
+
+    client.messageIngress(hash, DefaultPubsubTopic, msg)
+
+    let res = await client.storeSynchronization(Opt.some(serverPeerInfo))
+    assert res.isOk(), res.error
+
+    check remoteNeeds.contains((serverPeerInfo.peerId, hash)) == true
+
   asyncTest "sync 2 nodes different hashes":
     server = await newTestWakuRecon(
       serverSwitch, @[], @[], DefaultSyncRange, idsChannel, localWants, remoteNeeds
