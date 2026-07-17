@@ -13,14 +13,23 @@ suite "RateLimitManager - admission":
       let res = await rl.admit("payload".toBytes())
       check res.isOk()
 
-  asyncTest "admit is a pass-through in the skeleton even when enabled":
-    ## Documents the current skeleton behaviour: per-epoch enforcement is
-    ## not wired yet, so every call is admitted regardless of the
-    ## configured budget. This test flips to red as soon as real
-    ## enforcement lands, at which point it should be replaced with
-    ## budget-boundary assertions.
+  asyncTest "admit enforces the per-epoch budget when enabled":
     let rl = RateLimitManager.new(
       RateLimitConfig(enabled: true, epochPeriodSec: 600, messagesPerEpoch: 1)
     )
     check (await rl.admit("first".toBytes())).isOk()
-    check (await rl.admit("second".toBytes())).isOk()
+
+    let overBudget = await rl.admit("second".toBytes())
+    check overBudget.isErr()
+    check overBudget.error == RateLimitError.OverBudget
+
+  asyncTest "admit reopens the budget after the epoch rolls over":
+    let rl = RateLimitManager.new(
+      RateLimitConfig(enabled: true, epochPeriodSec: 600, messagesPerEpoch: 1)
+    )
+    check (await rl.admit("first".toBytes())).isOk()
+    check (await rl.admit("second".toBytes())).isErr()
+
+    # Simulate the epoch window elapsing; the next call must be admitted again.
+    rl.resetEpoch()
+    check (await rl.admit("third".toBytes())).isOk()
