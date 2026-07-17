@@ -136,6 +136,8 @@ type
     wakuKademlia*: WakuKademlia
     ports*: BoundPorts
     relayReconnectFut*: Future[void]
+    storeCatchUpFut*: Future[void]
+    storeSyncRange*: timer.Duration
 
   SubscriptionManager* = ref object of RootObj
     node*: WakuNode
@@ -379,6 +381,8 @@ proc mountStoreSync*(
 
   let pubsubTopics = shards.mapIt($RelayShard(clusterId: cluster, shardId: it))
 
+  node.storeSyncRange = storeSyncRange.seconds
+
   let recon = ?await SyncReconciliation.new(
     pubsubTopics, contentTopics, node.peerManager, node.wakuArchive,
     storeSyncRange.seconds, storeSyncInterval.seconds, storeSyncRelayJitter.seconds,
@@ -613,6 +617,66 @@ proc stopProvidersAndListeners*(node: WakuNode) =
   RequestContentTopicsHealth.clearProvider(node.brokerCtx)
   RequestShardTopicsHealth.clearProvider(node.brokerCtx)
 
+func useSyncCatchUp*(
+    hasReconciliation: bool,
+    lastOnline: Timestamp,
+    now: Timestamp,
+    syncRange: timer.Duration,
+): bool =
+  ## Startup catch-up decision: inside the sync window neighbour
+  ## reconciliation repairs the gap; beyond it (or on fresh start, when no
+  ## last-online timestamp exists) store resume is needed.
+  hasReconciliation and lastOnline > 0 and now - lastOnline <= syncRange.nanos
+
+proc storeStartupCatchUp(node: WakuNode) {.async.} =
+  ## Store as a startup-only dependency: estimate the offline gap from the
+  ## persisted last-online timestamp and catch up accordingly. Runs in the
+  ## background; node startup must not block on store or sync peers.
+  let lastOnline = node.wakuStoreResume.getLastOnlineTimestamp().valueOr:
+    error "catch-up: failed to read last online timestamp", error = error
+    Timestamp(0)
+
+  let now = getNowInNanosecondTime()
+
+  if useSyncCatchUp(
+    not node.wakuStoreReconciliation.isNil(), lastOnline, now, node.storeSyncRange
+  ):
+    info "offline gap within sync window, catching up via reconciliation",
+      gapSeconds = (now - lastOnline) div 1_000_000_000
+    # sleep first: the switch may not be started yet and discovery may still
+    # be warming up; retry failed attempts, the periodic sync loop remains
+    # the safety net if none succeeds within the budget
+    for _ in 0 ..< 24:
+      await sleepAsync(5.seconds)
+      if node.peerManager.selectPeer(WakuReconciliationCodec).isNone():
+        continue
+      (await node.wakuStoreReconciliation.storeSynchronization()).isOkOr:
+        error "startup reconciliation attempt failed", error = error
+        continue
+      return
+    warn "startup reconciliation did not complete; periodic sync remains the safety net"
+  else:
+    info "offline gap beyond sync window or fresh start, using store resume",
+      gapSeconds = (now - lastOnline) div 1_000_000_000
+    # don't burn resume tries against an empty peer store: wait (bounded)
+    # for a store peer to be discovered first
+    var peerWait = 24
+    var tries = 3
+    while tries > 0:
+      if node.peerManager.selectPeer(WakuStoreCodec).isNone():
+        peerWait -= 1
+        if peerWait <= 0:
+          warn "no store peer found for startup resume"
+          return
+        await sleepAsync(5.seconds)
+        continue
+      (await node.wakuStoreResume.autoStoreResume()).isOkOr:
+        tries -= 1
+        error "store resume failed", triesLeft = tries, error = $error
+        await sleepAsync(30.seconds)
+        continue
+      break
+
 proc start*(node: WakuNode) {.async.} =
   ## Starts a created Waku Node and
   ## all its mounted protocols.
@@ -626,7 +690,9 @@ proc start*(node: WakuNode) {.async.} =
       zeroPortPresent = true
 
   if not node.wakuStoreResume.isNil():
-    await node.wakuStoreResume.start()
+    # catch up in the background: startup must not block on store peers
+    node.storeCatchUpFut = node.storeStartupCatchUp()
+    node.wakuStoreResume.startPeriodicOnly()
 
   if not node.wakuRendezvousClient.isNil():
     await node.wakuRendezvousClient.start()
@@ -698,6 +764,12 @@ proc stop*(node: WakuNode) {.async.} =
 
   if not node.wakuArchive.isNil():
     await node.wakuArchive.stopWait()
+
+  if not node.storeCatchUpFut.isNil():
+    # in-flight store queries wrap awaits in results.catch, which can swallow
+    # the one cancellation delivery; bound shutdown instead of waiting for
+    # their natural completion
+    discard await node.storeCatchUpFut.cancelAndWait().withTimeout(5.seconds)
 
   if not node.wakuStoreResume.isNil():
     await node.wakuStoreResume.stopWait()

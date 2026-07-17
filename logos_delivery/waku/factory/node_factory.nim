@@ -279,7 +279,10 @@ proc setupProtocols(
       return err("failed to set node waku store peer: " & error)
     node.peerManager.addServicePeer(storeNode, WakuStoreCodec)
 
-  if conf.storeServiceConf.isSome and conf.storeServiceConf.get().resume:
+  if (conf.storeServiceConf.isSome and conf.storeServiceConf.get().resume) or
+      conf.storeSyncConf.isSome():
+    # sync-enabled full nodes track last-online so the startup catch-up can
+    # choose between neighbour reconciliation and store resume
     node.setupStoreResume()
 
   if conf.shardingConf.kind == AutoSharding:
