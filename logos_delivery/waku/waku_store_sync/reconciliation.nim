@@ -155,6 +155,21 @@ proc preProcessPayload(self: SyncReconciliation, payload: RangesData): Opt[Range
       elif rangeType == RangeType.ItemSet:
         payload.itemSets.delete(0)
     else:
+      # This range straddles our window's lower bound: mark the portion below
+      # our window as skip so a peer with a wider window does not reconcile
+      # (and offer us) messages older than we retain. Only triggers on a
+      # window mismatch; equal windows never straddle.
+      let lowerBound = payload.ranges[i][0].a.time
+      if lowerBound < selfLowerBound:
+        let clampId = SyncID(time: selfLowerBound, hash: EmptyFingerprint)
+        let belowSkip = (payload.ranges[i][0].a .. clampId, RangeType.Skip)
+
+        if rangeType == RangeType.ItemSet:
+          payload.itemSets[0].elements.keepItIf(it.time >= selfLowerBound)
+
+        payload.ranges[i][0].a = clampId
+        payload.ranges.insert(belowSkip, i)
+
       break
 
   return Opt.some(payload)

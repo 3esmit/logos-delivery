@@ -160,6 +160,44 @@ suite "Waku Sync: reconciliation":
       remoteNeeds.contains((serverPeerInfo.peerId, hash2)) == true
       remoteNeeds.contains((serverPeerInfo.peerId, hash3)) == true
 
+  asyncTest "wide-window peer does not push below-window messages to a narrow-window peer":
+    ## A store-like node (wide sync range) reconciling with a core-like node
+    ## (narrow range) must not flood the narrow node with history older than
+    ## its own window: preProcessPayload clamps incoming ranges to the
+    ## receiver's window, so only in-window messages are offered for transfer.
+    const
+      narrowRange = 30.minutes
+      wideRange = 2.hours
+
+    # server = narrow (core-like) ; client = wide (store-like), initiates
+    server = await newTestWakuRecon(
+      serverSwitch, @[], @[], narrowRange, idsChannel, localWants, remoteNeeds
+    )
+    client = await newTestWakuRecon(
+      clientSwitch, @[], @[], wideRange, idsChannel, localWants, remoteNeeds
+    )
+
+    let
+      tNow = now()
+      oldTs = tNow - 2_700_000_000_000 # 45 min ago: below the narrow window
+      recentTs = tNow - 300_000_000_000 # 5 min ago: inside both windows
+      oldMsg = fakeWakuMessage(ts = oldTs, contentTopic = DefaultContentTopic)
+      recentMsg = fakeWakuMessage(ts = recentTs, contentTopic = DefaultContentTopic)
+      oldHash = computeMessageHash(DefaultPubsubTopic, oldMsg)
+      recentHash = computeMessageHash(DefaultPubsubTopic, recentMsg)
+
+    client.messageIngress(oldHash, DefaultPubsubTopic, oldMsg)
+    client.messageIngress(recentHash, DefaultPubsubTopic, recentMsg)
+
+    let res = await client.storeSynchronization(Opt.some(serverPeerInfo))
+    assert res.isOk(), res.error
+
+    check:
+      # the recent, in-window message is offered to the narrow server
+      remoteNeeds.contains((serverPeerInfo.peerId, recentHash)) == true
+      # the old, below-window message is clamped out, never offered
+      remoteNeeds.contains((serverPeerInfo.peerId, oldHash)) == false
+
   asyncTest "sync 2 nodes different hashes":
     server = await newTestWakuRecon(
       serverSwitch, @[], @[], DefaultSyncRange, idsChannel, localWants, remoteNeeds
