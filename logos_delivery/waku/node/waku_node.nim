@@ -370,6 +370,9 @@ proc mountStoreSync*(
     storeSyncInterval: uint32,
     storeSyncRelayJitter: uint32,
 ): Future[Result[void, string]] {.async.} =
+  if node.wakuArchive.isNil():
+    return err("store sync requires a mounted archive")
+
   let idsChannel = newAsyncQueue[(SyncID, PubsubTopic, ContentTopic)](0)
   let wantsChannel = newAsyncQueue[(PeerId)](0)
   let needsChannel = newAsyncQueue[(PeerId, WakuMessageHash)](0)
