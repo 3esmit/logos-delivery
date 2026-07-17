@@ -404,10 +404,17 @@ proc mountStoreSync*(
     ## RLN mounts after store sync (but before the switch starts accepting
     ## connections), so capture the node and check at call time; nil rln
     ## means RLN is not configured on this network. Freshness is not
-    ## checked: synced messages are old by design. Known gap: proofs built
-    ## against roots older than the acceptable root window are rejected,
-    ## so history sync across heavy membership churn is bounded by it.
+    ## checked: synced messages are old by design. Known gaps: archives do
+    ## not persist RLN proofs, so archive-served messages arrive proofless
+    ## and can only be counted, not verified (enforcement needs proof
+    ## persistence); and proofs built against roots older than the
+    ## acceptable root window are rejected, bounding history sync across
+    ## heavy membership churn.
     if node.rln.isNil():
+      return true
+
+    if msg.proof.len == 0:
+      total_transfer_messages_unverified.inc()
       return true
 
     let res = await node.rln.validateMessage(msg, checkFreshness = false)
