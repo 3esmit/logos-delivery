@@ -54,7 +54,7 @@ endif
 .PHONY: all test clean examples deps nimble install-nim install-nimble
 
 # default target
-all: | wakunode2 liblogosdelivery
+all: | wakunode2 logosdeliverynode liblogosdelivery
 
 examples: | example2 chat2 chat2bridge
 
@@ -219,7 +219,7 @@ testcommon: | build-deps build
 ##########
 ## Waku ##
 ##########
-.PHONY: testwaku wakunode2 testwakunode2 example2 chat2 chat2bridge liteprotocoltester
+.PHONY: testwaku wakunode2 logosdeliverynode testwakunode2 example2 chat2 chat2bridge liteprotocoltester
 
 testwaku: | build-deps build rln-deps librln
 	echo -e $(BUILD_MSG) "build/$@" && \
@@ -234,6 +234,17 @@ ifeq ($(detected_OS),Windows)
 else
 	echo -e $(BUILD_MSG) "build/$@" && \
 		$(NIMBLE) wakunode2
+endif
+
+# Windows: build with nim directly — `nimble <task>` re-clones git deps every
+# build and they intermittently hang on the MSYS2 runner. Flags mirror logos_delivery.nimble.
+logosdeliverynode: | build-deps build deps librln
+ifeq ($(detected_OS),Windows)
+	echo -e $(BUILD_MSG) "build/$@" && \
+		nim c --out:build/logosdeliverynode --mm:refc --cpu:amd64 $(NIM_PARAMS) -d:chronicles_log_level=TRACE apps/logos_delivery_node/logosdeliverynode.nim
+else
+	echo -e $(BUILD_MSG) "build/$@" && \
+		$(NIMBLE) logosdeliverynode
 endif
 
 benchmarks: | build-deps build deps librln

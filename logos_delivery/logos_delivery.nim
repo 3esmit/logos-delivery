@@ -39,6 +39,8 @@ import logos_delivery/messaging/[messaging_client, messaging_client_lifecycle]
 export messaging_client
 import logos_delivery/messaging/api/[subscription, send]
 export subscription, send
+import logos_delivery/messaging/rest_api/handlers as messaging_rest_api
+export messaging_rest_api
 import logos_delivery/api/events/messaging_client_events
 export messaging_client_events
 import logos_delivery/api/conf/messaging_conf
@@ -106,21 +108,38 @@ proc new*(
 proc new*(
     T: type LogosDelivery, conf: WakuNodeConf, appCallbacks: AppCallbacks = nil
 ): Future[Result[LogosDelivery, string]] {.async.} =
-  ## Builds the full stack from a kernel `WakuNodeConf`.
-  return await LogosDelivery.new(
-    LogosDeliveryConf(
-      kernelConf: KernelConf(conf),
-      messagingConf: Opt.some(MessagingClientConf()),
-      channelsConf: Opt.some(ReliableChannelManagerConf()),
-    ),
-    appCallbacks,
+  ## Builds the stack from a kernel `WakuNodeConf`, selecting which API layers to
+  ## instantiate by `conf.entryLayer`:
+  ##   kernel    -> transport only; `conf.mode` is ignored and the config is used as-is
+  ##   messaging -> kernel + messaging client
+  ##   channels  -> kernel + messaging + reliable channels
+  ## For `messaging`/`channels`, `conf.mode` (Edge/Core) sets the kernel protocol
+  ## flags first (messaging-level concern); for `kernel` it is skipped.
+  var kernelConf = conf
+  if conf.entryLayer != EntryLayer.kernel:
+    applyMode(kernelConf, conf.mode).isOkOr:
+      return err("failed to apply mode: " & error)
+
+  let ldConf = LogosDeliveryConf(
+    kernelConf: KernelConf(kernelConf),
+    messagingConf:
+      if conf.entryLayer == EntryLayer.kernel:
+        Opt.none(MessagingClientConf)
+      else:
+        Opt.some(MessagingClientConf()),
+    channelsConf:
+      if conf.entryLayer == EntryLayer.channels:
+        Opt.some(ReliableChannelManagerConf())
+      else:
+        Opt.none(ReliableChannelManagerConf),
   )
+  return await LogosDelivery.new(ldConf, appCallbacks)
 
 proc new*(
     T: type LogosDelivery, kernelConf: KernelConf, appCallbacks: AppCallbacks = nil
 ): Future[Result[LogosDelivery, string]] {.async.} =
-  ## Fleet mode: mounts the kernel only from a raw `KernelConf`; no messaging client,
-  ## no channel manager.
+  ## Kernel entry layer: mounts the kernel only from a raw `KernelConf`; no
+  ## messaging client, no channel manager.
   return await LogosDelivery.new(LogosDeliveryConf.init(kernelConf), appCallbacks)
 
 proc new*(
@@ -143,14 +162,23 @@ proc new*(
 
 proc new*(
     T: type LogosDelivery,
+    entryLayer: EntryLayer = EntryLayer.channels,
     mode: LogosDeliveryMode = LogosDeliveryMode.Core,
     preset: string = "",
     messagingOverrides: MessagingClientConf = MessagingClientConf(),
     channelsOverrides: ReliableChannelManagerConf = ReliableChannelManagerConf(),
     appCallbacks: AppCallbacks = nil,
 ): Future[Result[LogosDelivery, string]] {.async.} =
-  ## Messaging entry point (app dev). Builds the full stack from preset, mode and overrides.
-  let conf = LogosDeliveryConf.init(mode, preset, messagingOverrides, channelsOverrides).valueOr:
+  ## Messaging entry point (app dev). Builds the stack from preset, mode and
+  ## overrides; `entryLayer` selects messaging vs channels (use `new(kernelConf)`
+  ## for a kernel-only node).
+  let conf = LogosDeliveryConf.init(
+    entryLayer = entryLayer,
+    mode = mode,
+    preset = preset,
+    messagingOverrides = messagingOverrides,
+    channelsOverrides = channelsOverrides,
+  ).valueOr:
     return err("failed to synthesize configuration: " & error)
   return await LogosDelivery.new(conf, appCallbacks)
 
@@ -165,6 +193,10 @@ proc start*(self: LogosDelivery): Future[Result[void, string]] {.async.} =
   if not self.messagingClient.isNil():
     self.messagingClient.start().isOkOr:
       return err("failed to start MessagingClient: " & error)
+    # Mount the messaging REST endpoints onto the kernel's REST router (no-op if
+    # REST is disabled). Done here rather than in MessagingClient.start so the
+    # core messaging module need not depend on the REST layer above it.
+    self.messagingClient.mountRestApi()
 
   if not self.reliableChannelManager.isNil():
     self.reliableChannelManager.start().isOkOr:
@@ -190,15 +222,15 @@ proc isOnline*(self: LogosDelivery): Future[Result[bool, string]] {.async.} =
   return await self.waku.isOnline()
 
 proc ensureMessaging*(self: LogosDelivery): Result[void, string] =
-  ## Fails if the node has no messaging client (a kernel-only / fleet node).
+  ## Fails if the node has no messaging client (a kernel-only node).
   if self.isNil() or self.messagingClient.isNil():
-    return err("node has no messaging client (kernel-only/fleet node)")
+    return err("node has no messaging client (kernel-only node)")
   ok()
 
 proc ensureChannels*(self: LogosDelivery): Result[void, string] =
-  ## Fails if the node has no reliable channel manager (a kernel-only / fleet node).
+  ## Fails if the node has no reliable channel manager (a kernel-only node).
   if self.isNil() or self.reliableChannelManager.isNil():
-    return err("node has no reliable channel manager (kernel-only/fleet node)")
+    return err("node has no reliable channel manager (kernel-only node)")
   ok()
 
 # Compile-time check that each concrete type satisfies its API concept.
