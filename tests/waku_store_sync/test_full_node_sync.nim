@@ -31,7 +31,9 @@ type FullNode = object
   peerInfo: RemotePeerInfo
   peerManager: PeerManager
 
-proc newFullNode(): Future[FullNode] {.async.} =
+proc newFullNode(
+    msgValidator: Opt[TransferValidator] = Opt.none(TransferValidator)
+): Future[FullNode] {.async.} =
   ## Mirrors the wiring of WakuNode.mountStoreSync: one peer manager and
   ## three shared channels connect reconciliation and transfer.
   let switch = newTestSwitch()
@@ -68,6 +70,7 @@ proc newFullNode(): Future[FullNode] {.async.} =
     idsTx = idsChannel,
     localWantsRx = wantsChannel,
     remoteNeedsRx = needsChannel,
+    msgValidator = msgValidator,
   )
 
   await transfer.start()
@@ -153,3 +156,25 @@ suite "Waku Sync: full node miss recovery":
     check:
       await nodeA.hasMessage(hashB)
       await nodeB.hasMessage(hashA)
+
+  asyncTest "messages failing transfer validation are not archived":
+    await nodeB.stop()
+
+    let rejectAll: TransferValidator = proc(msg: WakuMessage): Future[bool] {.async.} =
+      return false
+
+    nodeB = await newFullNode(msgValidator = Opt.some(rejectAll))
+    nodeA.peerManager.addPeer(nodeB.peerInfo)
+    nodeB.peerManager.addPeer(nodeA.peerInfo)
+
+    let msg = fakeWakuMessage(contentTopic = DefaultContentTopic)
+    let hash = computeMessageHash(DefaultPubsubTopic, msg)
+
+    nodeA.insertMessage(msg)
+
+    let res = await nodeB.recon.storeSynchronization(Opt.some(nodeA.peerInfo))
+    assert res.isOk(), $res.error
+
+    await sleepAsync(1.seconds)
+
+    check not await nodeB.hasMessage(hash)

@@ -394,8 +394,28 @@ proc mountStoreSync*(
   reconMountRes.isOkOr:
     return err(error.msg)
 
+  let transferValidator: TransferValidator = proc(
+      msg: WakuMessage
+  ): Future[bool] {.async.} =
+    ## RLN mounts after store sync (but before the switch starts accepting
+    ## connections), so capture the node and check at call time; nil rln
+    ## means RLN is not configured on this network. Freshness is not
+    ## checked: synced messages are old by design. Known gap: proofs built
+    ## against roots older than the acceptable root window are rejected,
+    ## so history sync across heavy membership churn is bounded by it.
+    if node.rln.isNil():
+      return true
+
+    let res = await node.rln.validateMessage(msg, checkFreshness = false)
+    return res == MessageValidationResult.Valid
+
   let transfer = SyncTransfer.new(
-    node.peerManager, node.wakuArchive, idsChannel, wantsChannel, needsChannel
+    node.peerManager,
+    node.wakuArchive,
+    idsChannel,
+    wantsChannel,
+    needsChannel,
+    msgValidator = Opt.some(transferValidator),
   )
 
   node.wakuStoreTransfer = transfer
