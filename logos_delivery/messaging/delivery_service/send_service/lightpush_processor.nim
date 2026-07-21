@@ -37,10 +37,11 @@ method sendImpl*(
     if error.isRlnRejection():
       ## The proof was refused, so it must not be sent again: drop it and let
       ## the refreshed merkle path produce a new one on the next round.
-      ## Re-admission gates the regeneration, so a task cannot spin through the
-      ## epoch budget by retrying.
+      ## Resetting admission re-charges the fresh nonce that regeneration draws,
+      ## so a task cannot spin through the epoch budget by retrying.
       self.waku.onRlnProofRejected()
       task.msg.proof = @[]
+      task.firstAdmittedTime = Opt.none(Moment)
       task.state = DeliveryState.NextRoundRetry
       return
 

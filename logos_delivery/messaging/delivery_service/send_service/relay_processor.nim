@@ -69,9 +69,11 @@ method sendImpl*(self: RelaySendProcessor, task: DeliveryTask) {.async.} =
       ## The relay validator refused the proof. Dropping it and retrying is not
       ## the same as failing: the message is valid, its proof went stale against
       ## a moved merkle root. Clearing it makes the next round regenerate one
-      ## against the refreshed path.
+      ## against the refreshed path; resetting admission re-charges the fresh
+      ## nonce that regeneration draws.
       self.waku.onRlnProofRejected()
       task.msg.proof = @[]
+      task.firstAdmittedTime = Opt.none(Moment)
       task.state = DeliveryState.NextRoundRetry
       return
 
