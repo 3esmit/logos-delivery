@@ -82,6 +82,19 @@ func isRlnRejection*(error: ErrorStatus): bool =
       error.desc.get("").contains(RlnValidatorErrorMsg)
     )
 
+proc currentRlnEpochQuota*(self: Waku): Opt[tuple[epochIndex, messageLimit: uint64]] =
+  ## RLN's current epoch index and the epoch's user message limit, read
+  ## together so the pair cannot straddle an epoch boundary. `none` when RLN is
+  ## not mounted (or its limit is unset) — which the rate limit manager reads as
+  ## "fall back to the wall-clock window and the configured limit".
+  if self.node.rln.isNil():
+    return Opt.none(tuple[epochIndex, messageLimit: uint64])
+
+  let limit = self.node.rln.groupManager.userMessageLimit.valueOr:
+    return Opt.none(tuple[epochIndex, messageLimit: uint64])
+
+  return Opt.some((fromEpoch(self.node.rln.getCurrentEpoch()), uint64(limit)))
+
 proc onRlnProofRejected*(self: Waku) =
   ## Called when a publish was rejected as RLN-invalid. Starts refetching the
   ## merkle path in the background, so the next proof generated for the message
