@@ -164,17 +164,16 @@
       }
     },
     "testutils": {
-      "version": "0.8.2",
-      "vcsRevision": "74588b8b55d116ca057431ae3a0ca359e0825fcd",
+      "version": "0.8.1",
+      "vcsRevision": "6ce5e5e2301ccbc04b09d27ff78741ff4d352b4d",
       "url": "https://github.com/status-im/nim-testutils",
       "downloadMethod": "git",
       "dependencies": [
         "nim",
-        "stew",
         "unittest2"
       ],
       "checksums": {
-        "sha1": "c4a67c4ca30e1b0c7198b2912409e064e011d400"
+        "sha1": "96a11cf8b84fa9bd12d4a553afa1cc4b7f9df4e3"
       }
     },
     "zlib": {
