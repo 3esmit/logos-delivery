@@ -122,14 +122,15 @@ method close*(self: FallbackPortMapper) {.async: (raises: []), gcsafe.} =
     await candidate.close()
   self.candidates = @[]
 
-const NatDiscoveryTimeout = 3.seconds
+const NatDiscoveryTimeout = 1.seconds
   ## Bounds the gateway discovery the NATService performs during switch
-  ## start. nim-eth's setupNat waited 200ms for UPnP discovery, once per
-  ## process; libp2p's 10-second default is paid per candidate mechanism and
-  ## per switch, so on networks without a gateway every node start stalls
-  ## for tens of seconds. 3 seconds keeps a 15x margin over the discovery
-  ## window every gateway had to answer within before the libp2p NATService
-  ## migration.
+  ## start. Node start awaits discovery, and miniupnpc repeats its SSDP
+  ## probe rounds each waiting the full timeout, so on networks without a
+  ## gateway the start stall is several times this value per mechanism
+  ## (observed: 44s at libp2p's 10-second default, 20s at 3 seconds). One
+  ## second keeps the worst-case stall in single digits while still giving
+  ## gateways five times the 200ms window nim-eth's setupNat allowed them
+  ## before the libp2p NATService migration.
 
 proc toNatConfig*(strategy: NatStrategy): Opt[NATConfig] =
   ## The libp2p `NATConfig` for a strategy, or none when no NATService is
