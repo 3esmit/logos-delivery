@@ -105,28 +105,31 @@ proc setupSwitchServices(
         error "failed to update announced multiaddress", error = $error
 
   let autonatService = getAutonatService(rng)
-  if conf.circuitRelayClient:
-    ## The node is considered to be behind a NAT or firewall and then it
-    ## should struggle to be reachable and establish connections to other nodes
-    const MaxNumRelayServers = 2
-    let autoRelayService = AutoRelayService.new(
-      MaxNumRelayServers, RelayClient(circuitRelay), onReservation, rng
-    )
-    let holePunchService = HPService.new(autonatService, autoRelayService)
-    waku.node.switch.services = @[Service(holePunchService)]
-  else:
-    waku.node.switch.services = @[Service(autonatService)]
+  let newService =
+    if conf.circuitRelayClient:
+      ## The node is considered to be behind a NAT or firewall and then it
+      ## should struggle to be reachable and establish connections to other nodes
+      const MaxNumRelayServers = 2
+      let autoRelayService = AutoRelayService.new(
+        MaxNumRelayServers, RelayClient(circuitRelay), onReservation, rng
+      )
+      Service(HPService.new(autonatService, autoRelayService))
+    else:
+      Service(autonatService)
+
+  # Append rather than replace: the builder-attached services (wildcard
+  # address resolver, NATService port mapping) must survive.
+  waku.node.switch.services.add(newService)
 
   # libp2p 2.0.0 split Service.setup out of Service.start: the switch runs setup
   # only at build time (SwitchBuilder.setupServices), while switch.start calls
-  # just start. These services are created and attached post-build, so setup must
+  # just start. This service is created and attached post-build, so setup must
   # be invoked explicitly here -- otherwise AutonatService.addressMapper stays nil
   # and the peerInfo.update() inside start dereferences it (SIGSEGV).
-  for service in waku.node.switch.services:
-    try:
-      service.setup(waku.node.switch)
-    except ServiceSetupError as e:
-      error "failed to set up libp2p switch service", error = e.msg
+  try:
+    newService.setup(waku.node.switch)
+  except ServiceSetupError as e:
+    error "failed to set up libp2p switch service", error = e.msg
 
 ## Initialisation
 
@@ -265,11 +268,19 @@ proc getRunningNetConfig(waku: Waku): Future[Result[NetConfig, string]] {.async.
   if quicPort.isSome() and conf.quicConf.isSome():
     conf.quicConf.get().port = quicPort.get()
 
+  # External IP and mapped ports discovered by the switch's NATService
+  # (UPnP / NAT-PMP), so the recomputed NetConfig and the ENR carry the
+  # mapped external endpoint.
+  let natExtIp = waku.node.natExternalIp()
+  let natMappedPorts = getPorts(waku.node.natMappedExternalAddresses()).valueOr:
+    return err("Could not retrieve NAT-mapped ports: " & error)
+
   # Rebuild NetConfig from the bound ports already read back into `conf`.
   let netConf = (
     await networkConfiguration(
       conf.clusterId, conf.endpointConf, conf.discv5Conf, conf.webSocketConf,
-      conf.quicConf, conf.wakuFlags, conf.dnsAddrsNameServers, clientId,
+      conf.quicConf, conf.wakuFlags, conf.dnsAddrsNameServers, natExtIp,
+      natMappedPorts.tcpPort, natMappedPorts.quicPort,
     )
   ).valueOr:
     return err("Could not update NetConfig: " & error)

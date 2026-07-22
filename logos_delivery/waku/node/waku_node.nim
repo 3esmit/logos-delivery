@@ -13,7 +13,7 @@ import
   eth/p2p/discoveryv5/enr,
   libp2p/crypto/crypto,
   libp2p/crypto/curve25519,
-  libp2p/[multiaddress, multicodec],
+  libp2p/[multiaddress, multicodec, wire],
   libp2p/protocols/ping,
   libp2p/protocols/pubsub/gossipsub,
   libp2p/protocols/pubsub/rpc/messages,
@@ -21,7 +21,6 @@ import
   libp2p/transports/transport,
   libp2p/transports/tcptransport,
   libp2p/transports/wstransport,
-  libp2p/utility,
   libp2p/utils/offsettedseq,
   libp2p_mix,
   libp2p_mix/mix_protocol,
@@ -125,6 +124,10 @@ type
     wakuRendezvous*: WakuRendezVous
     wakuRendezvousClient*: rendezvous_client.WakuRendezVousClient
     announcedAddresses*: seq[MultiAddress]
+    natMappedAddresses*: seq[MultiAddress]
+      ## peerInfo.addrs as produced by the switch's own address mappers
+      ## (wildcard resolver + NATService port mapping) during switch.start,
+      ## captured before waku's announce mapper takes over peerInfo.addrs
     extMultiAddrsOnly*: bool # When true, skip automatic IP address replacement
     started*: bool # Indicates that node has started listening
     topicSubscriptionQueue*: AsyncEventQueue[SubscriptionEvent]
@@ -461,6 +464,49 @@ proc mountRendezvous*(
   except LPError:
     error "failed to mount wakuRendezvous", error = getCurrentExceptionMsg()
 
+proc natExternalIp*(node: WakuNode): Opt[IpAddress] =
+  ## External IP discovered by the switch's NATService (UPnP / NAT-PMP), if
+  ## one is configured and discovery succeeded.
+  let natSvc = natService(node.switch).valueOr:
+    return Opt.none(IpAddress)
+  natSvc.externalIp
+
+proc ipOf(ma: MultiAddress): Opt[IpAddress] =
+  let ta = initTAddress(ma).valueOr:
+    return Opt.none(IpAddress)
+  try:
+    Opt.some(ta.address())
+  except ValueError:
+    Opt.none(IpAddress)
+
+proc natMappedExternalAddresses*(node: WakuNode): seq[MultiAddress] =
+  ## The subset of the captured NATService output that carries the discovered
+  ## external IP, i.e. the addresses reachable through the port mappings.
+  let externalIp = node.natExternalIp().valueOr:
+    return @[]
+  node.natMappedAddresses.filterIt(ipOf(it) == Opt.some(externalIp))
+
+proc foldNatMappedAddresses(node: WakuNode) =
+  ## Replace bind-derived (loopback/private/unspecified) announced addresses
+  ## with the NATService-mapped external ones, keeping public and dns-based
+  ## entries. No-op when there is no NAT mapping or the user pinned the
+  ## announced addresses via extMultiAddrsOnly.
+  if node.extMultiAddrsOnly:
+    return
+
+  let mapped = node.natMappedExternalAddresses()
+  if mapped.len == 0:
+    return
+
+  var newAnnounced = mapped
+  for address in node.announcedAddresses:
+    if address.isPublicMA() and address notin newAnnounced:
+      newAnnounced.add(address)
+
+  info "Replacing announced addresses with NAT-mapped external addresses",
+    previous = $node.announcedAddresses, updated = $newAnnounced
+  node.announcedAddresses = newAnnounced
+
 proc isBindIpWithZeroPort(inputMultiAdd: MultiAddress): bool =
   let inputStr = $inputMultiAdd
   if inputStr.contains("0.0.0.0/tcp/0") or inputStr.contains("127.0.0.1/tcp/0"):
@@ -608,17 +654,33 @@ proc start*(node: WakuNode) {.async.} =
   if not node.wakuRendezvousClient.isNil():
     await node.wakuRendezvousClient.start()
 
-  ## The switch uses this mapper to update peer info addrs
-  ## with announced addrs after start
+  ## NOTE: This will dispatch gossipsub start to the WakuRelay.start method
+  ## override. During start the switch's own address mappers run against the
+  ## listen addresses (wildcard resolver expansion, NATService external-IP
+  ## discovery and port mapping).
+  await node.switch.start()
+
+  ## Capture the switch-produced addresses (in particular the NATService
+  ## mapped external addresses) and fold them into the announced addresses.
+  node.natMappedAddresses = node.switch.peerInfo.addrs
+  node.foldNatMappedAddresses()
+
+  ## The switch uses this mapper to update peer info addrs with announced
+  ## addrs on subsequent peerInfo updates. It is added after switch.start so
+  ## the NATService output could be captured above; from here on waku's
+  ## announced addresses are authoritative for peerInfo.addrs, while the
+  ## NATService mapper (which runs earlier in the mapper chain, on the raw
+  ## listen addresses) keeps renewing the port-mapping leases on each update.
   let addressMapper = proc(
       listenAddrs: seq[MultiAddress]
   ): Future[seq[MultiAddress]] {.gcsafe, async: (raises: [CancelledError]).} =
     return node.announcedAddresses
   node.switch.peerInfo.addressMappers.add(addressMapper)
 
-  ## The switch will update addresses after start using the addressMapper
-  ## NOTE: This will dispatch gossipsub start to the WakuRelay.start method override
-  await node.switch.start()
+  ## Re-run the mapper chain so peerInfo.addrs immediately reflects the
+  ## announced addresses: the switch already ran it once during start, before
+  ## this mapper existed.
+  await node.switch.peerInfo.update()
 
   # Reconnect to known relay peers in the background; it waits a prune backoff
   # and must not block startup.

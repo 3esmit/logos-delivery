@@ -289,7 +289,11 @@ proc withDns4DomainName*(b: var WakuConfBuilder, dns4DomainName: string) =
   b.dns4DomainName = Opt.some(dns4DomainName)
 
 proc withNatStrategy*(b: var WakuConfBuilder, natStrategy: string) =
-  b.natStrategy = Opt.some(natStrategy)
+  # An empty string means "not specified" (e.g. a programmatically built
+  # WakuNodeConf whose `nat` field was never set): leave the builder unset so
+  # the default applies.
+  if natStrategy != "":
+    b.natStrategy = Opt.some(natStrategy)
 
 proc withAgentString*(b: var WakuConfBuilder, agentString: string) =
   b.agentString = Opt.some(agentString)
@@ -674,12 +678,15 @@ proc build*(
       warn "Log Format not specified, defaulting to TEXT"
       DefaultLogFormat
 
-  let natStrategy =
+  let natStrategyStr =
     if builder.natStrategy.isSome():
       builder.natStrategy.get()
     else:
       warn "Nat Strategy is not specified, defaulting to none"
       DefaultNatStrategy
+
+  let natStrategy = parseNatStrategy(natStrategyStr).valueOr:
+    return err("Invalid NAT strategy: " & error)
 
   var p2pTcpPort = builder.p2pTcpPort.get(DefaultP2pTcpPort)
 
