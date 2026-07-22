@@ -122,6 +122,15 @@ method close*(self: FallbackPortMapper) {.async: (raises: []), gcsafe.} =
     await candidate.close()
   self.candidates = @[]
 
+const NatDiscoveryTimeout = 3.seconds
+  ## Bounds the gateway discovery the NATService performs during switch
+  ## start. nim-eth's setupNat waited 200ms for UPnP discovery, once per
+  ## process; libp2p's 10-second default is paid per candidate mechanism and
+  ## per switch, so on networks without a gateway every node start stalls
+  ## for tens of seconds. 3 seconds keeps a 15x margin over the discovery
+  ## window every gateway had to answer within before the libp2p NATService
+  ## migration.
+
 proc toNatConfig*(strategy: NatStrategy): Opt[NATConfig] =
   ## The libp2p `NATConfig` for a strategy, or none when no NATService is
   ## wanted. `NatExtIp` is deliberately not mapped: the static external IP is
@@ -129,9 +138,9 @@ proc toNatConfig*(strategy: NatStrategy): Opt[NATConfig] =
   ## explicit-ip address mapper would drop dns4 announced addresses.
   case strategy.kind
   of NatUpnp, NatAny:
-    Opt.some(upnpConfig())
+    Opt.some(upnpConfig(discoveryTimeout = NatDiscoveryTimeout))
   of NatPmp:
-    Opt.some(natPmpConfig())
+    Opt.some(natPmpConfig(discoveryTimeout = NatDiscoveryTimeout))
   of NatNone, NatExtIp:
     Opt.none(NATConfig)
 

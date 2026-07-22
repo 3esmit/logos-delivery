@@ -14,6 +14,7 @@ suite "LogosDelivery API - Create node":
     ## Given
     var nodeConf = MessagingClientConf().toWakuNodeConf(Core).valueOr:
         raiseAssert "toWakuNodeConf failed: " & error
+    nodeConf.nat = "none"
     nodeConf.clusterId = Opt.some(3'u16)
     nodeConf.rest = false
 
@@ -33,6 +34,7 @@ suite "LogosDelivery API - Create node":
     ## Given
     var nodeConf = MessagingClientConf().toWakuNodeConf(Core).valueOr:
         raiseAssert "toWakuNodeConf failed: " & error
+    nodeConf.nat = "none"
     nodeConf.clusterId = Opt.some(99'u16)
     nodeConf.rest = false
     nodeConf.numShardsInNetwork = 16
@@ -64,6 +66,7 @@ suite "LogosDelivery API - Create node":
     ## Given
     var nodeConf = MessagingClientConf().toWakuNodeConf(Core).valueOr:
         raiseAssert "toWakuNodeConf failed: " & error
+    nodeConf.nat = "none"
     nodeConf.clusterId = Opt.some(42'u16)
     nodeConf.rest = false
     nodeConf.entryNodes = @[

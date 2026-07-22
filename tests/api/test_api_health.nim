@@ -93,6 +93,7 @@ suite "LM API health checking":
     lockNewGlobalBrokerContext:
       var conf = MessagingClientConf().toWakuNodeConf(Core).valueOr:
           raiseAssert error
+      conf.nat = "none"
       conf.listenAddress = parseIpAddress("0.0.0.0")
       conf.tcpPort = Port(0)
       conf.discv5UdpPort = Port(0)
@@ -273,6 +274,7 @@ suite "LM API health checking":
     lockNewGlobalBrokerContext:
       var edgeConf = MessagingClientConf().toWakuNodeConf(Edge).valueOr:
           raiseAssert error
+      edgeConf.nat = "none"
       edgeConf.listenAddress = parseIpAddress("0.0.0.0")
       edgeConf.tcpPort = Port(0)
       edgeConf.discv5UdpPort = Port(0)
