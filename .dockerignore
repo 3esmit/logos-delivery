@@ -5,5 +5,7 @@
 /tests
 /metrics
 /nimcache
+/nimbledeps
+/build
 librln*
 **/vendor/*
