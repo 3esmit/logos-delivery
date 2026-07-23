@@ -5,7 +5,7 @@ import std/net, testutils/unittests, chronos, results
 import
   logos_delivery/waku/[
     node/peer_manager,
-    node/waku_node,
+    waku_node,
     waku_core,
     waku_store/resume,
     waku_store/common,
@@ -105,8 +105,46 @@ suite "Store Resume - End to End":
 
     await client.start()
 
-    countRes = await clientDriver.getMessagesCount()
+    # catch-up runs in the background (store is a startup-only dependency;
+    # node startup no longer blocks on it), so poll for its completion
+    var count = 0'i64
+    for _ in 0 ..< 75:
+      await sleepAsync(200.milliseconds)
+      count = (await clientDriver.getMessagesCount()).valueOr:
+        continue
+      if count == 10:
+        break
+
+    check:
+      count == 10
+
+  asyncTest "resume archives messages older than the archive freshness window":
+    ## Catch-up messages are older than the archive's 20 s live-traffic
+    ## freshness filter by definition, so resume must feed them through the
+    ## sync ingress; through the validated live path the whole catch-up
+    ## would be silently dropped.
+    let hourAgo = Timestamp(getNowInNanosecondTime() - 3_600_000_000_000)
+    let oldMessages = @[
+      fakeWakuMessage(@[byte 10], ts = hourAgo),
+      fakeWakuMessage(@[byte 11], ts = hourAgo + 1),
+      fakeWakuMessage(@[byte 12], ts = hourAgo + 2),
+      fakeWakuMessage(@[byte 13], ts = hourAgo + 3),
+      fakeWakuMessage(@[byte 14], ts = hourAgo + 4),
+    ]
+    serverDriver = serverDriver.put(DefaultPubsubTopic, oldMessages)
+
+    await client.start()
+
+    # resume from a deep, beyond-freshness-window gap: the server holds
+    # 10 fresh messages plus 5 from an hour ago, all inside the gap
+    let twoHoursAgo = Timestamp(getNowInNanosecondTime() - 7_200_000_000_000)
+    let serverPeer = server.peerInfo.toRemotePeerInfo()
+
+    let res = await client.wakuStoreResume.startStoreResume(twoHoursAgo, serverPeer)
+    assert res.isOk(), $res.error
+
+    let countRes = await clientDriver.getMessagesCount()
     assert countRes.isOk(), $countRes.error
 
     check:
-      countRes.get() == 10
+      countRes.get() == 15

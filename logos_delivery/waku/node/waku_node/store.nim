@@ -23,6 +23,7 @@ import
   ../../waku_store/client as store_client,
   ../../waku_store/common as store_common,
   ../../waku_store/resume,
+  ../../waku_store_sync/reconciliation,
   ../peer_manager,
   ../../common/rate_limit/setting,
   ../../waku_archive
@@ -151,8 +152,21 @@ proc query*(
   return ok(response)
 
 proc setupStoreResume*(node: WakuNode) =
+  # Resume-fetched messages also feed reconciliation, so the next sync
+  # round does not re-request history the store already provided. The
+  # reconciliation protocol may mount after resume is set up; check at
+  # call time.
+  let reconIngress: ReconciliationIngress = proc(
+      msgHash: WakuMessageHash, pubsubTopic: PubsubTopic, msg: WakuMessage
+  ) {.gcsafe, raises: [].} =
+    if not node.wakuStoreReconciliation.isNil():
+      node.wakuStoreReconciliation.messageIngress(msgHash, pubsubTopic, msg)
+
   node.wakuStoreResume = StoreResume.new(
-    node.peerManager, node.wakuArchive, node.wakuStoreClient
+    node.peerManager,
+    node.wakuArchive,
+    node.wakuStoreClient,
+    reconIngress = Opt.some(reconIngress),
   ).valueOr:
     error "Failed to setup Store Resume", error = $error
     return

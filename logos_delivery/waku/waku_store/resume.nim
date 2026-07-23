@@ -14,6 +14,7 @@ import
 import
   ../common/databases/db_sqlite,
   ../waku_core,
+  ../waku_core/message/digest,
   ../waku_archive,
   ../common/nimchronos,
   ../waku_store/[client, common],
@@ -31,6 +32,12 @@ type
   TransferCallback* = proc(
     timestamp: Timestamp, peer: RemotePeerInfo
   ): Future[Result[void, string]] {.async: (raises: []), closure.}
+
+  ReconciliationIngress* = proc(
+    msgHash: WakuMessageHash, pubsubTopic: PubsubTopic, msg: WakuMessage
+  ) {.gcsafe, raises: [].}
+    ## Feeds a resume-fetched message into the reconciliation storage so
+    ## peers are not asked again for messages the store already provided.
 
   StoreResume* = ref object
     handle: Future[void]
@@ -62,7 +69,10 @@ proc setupLastOnlineDB(): Result[SqliteDatabase, string] =
   return ok(db)
 
 proc initTransferHandler(
-    self: StoreResume, wakuArchive: WakuArchive, wakuStoreClient: WakuStoreClient
+    self: StoreResume,
+    wakuArchive: WakuArchive,
+    wakuStoreClient: WakuStoreClient,
+    reconIngress: Opt[ReconciliationIngress],
 ) =
   # guard clauses to prevent faulty callback
   if self.peerManager.isNil():
@@ -102,12 +112,28 @@ proc initTransferHandler(
         req.paginationCursor = response.paginationCursor
 
         for kv in response.messages:
-          let handleRes = catch:
-            await wakuArchive.handleMessage(kv.pubsubTopic.get(), kv.message.get())
+          let
+            pubsubTopic = kv.pubsubTopic.get()
+            msg = kv.message.get()
+            msgHash = computeMessageHash(pubsubTopic, msg)
 
-          handleRes.isOkOr:
+          # Catch-up messages are older than the archive's live-traffic
+          # freshness window by definition, so they must enter through the
+          # sync ingress, which skips that validation (same path the
+          # store-sync transfer uses).
+          let handleRes = catch:
+            await wakuArchive.syncMessageIngress(msgHash, pubsubTopic, msg)
+
+          let res = handleRes.valueOr:
             error "message transfer failed", error = error.msg
             continue
+
+          res.isOkOr:
+            error "message transfer failed", error = error
+            continue
+
+          if reconIngress.isSome():
+            reconIngress.get()(msgHash, pubsubTopic, msg)
 
         if req.paginationCursor.isNone():
           break
@@ -120,6 +146,7 @@ proc new*(
     peerManager: PeerManager,
     wakuArchive: WakuArchive,
     wakuStoreClient: WakuStoreClient,
+    reconIngress: Opt[ReconciliationIngress] = Opt.none(ReconciliationIngress),
 ): Result[T, string] =
   info "initializing store resume"
 
@@ -132,7 +159,7 @@ proc new*(
 
   let resume = StoreResume(db: db, replaceStmt: replaceStmt, peerManager: peerManager)
 
-  resume.initTransferHandler(wakuArchive, wakuStoreClient)
+  resume.initTransferHandler(wakuArchive, wakuStoreClient, reconIngress)
 
   return ok(resume)
 
