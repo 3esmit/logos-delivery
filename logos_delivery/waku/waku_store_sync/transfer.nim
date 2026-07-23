@@ -1,7 +1,7 @@
 {.push raises: [].}
 
 import
-  std/[sets, tables],
+  std/tables,
   results,
   chronicles,
   chronos,
@@ -31,6 +31,12 @@ import
 logScope:
   topics = "waku transfer"
 
+# How long after a reconciliation session a peer's transfer messages are
+# still accepted. Pushes can lag the session (large backlogs are sent one
+# message at a time) and periodic sync refreshes the window every interval,
+# so this only needs to cover one catch-up burst.
+const TransferAllowancePeriod = 10.minutes
+
 type TransferValidator* = proc(msg: WakuMessage): Future[bool] {.gcsafe, raises: [].}
   ## Returns false when a received transfer message must be dropped
   ## (e.g. failed RLN proof verification).
@@ -43,10 +49,14 @@ type SyncTransfer* = ref object of LPProtocol
   # Send IDs to reconciliation protocol for storage
   idsTx: AsyncQueue[(SyncID, PubsubTopic, ContentTopic)]
 
-  # Receive Hashes from reconciliation protocol for reception
+  # Receive session signals from the reconciliation protocol
   localWantsRx: AsyncQueue[PeerId]
   localWantsRxFut: Future[void]
-  inSessions: HashSet[PeerId]
+
+  # DoS protection: peers with a recent reconciliation session and the
+  # deadline until which their transfer messages are accepted; anything
+  # from a peer outside its window is unsolicited.
+  allowedPeers: Table[PeerId, Moment]
 
   # Receive Hashes from reconciliation protocol for transmission
   remoteNeedsRx: AsyncQueue[(PeerId, WakuMessageHash)]
@@ -84,14 +94,13 @@ proc openConnection(
   return ok(conn)
 
 proc wantsReceiverLoop(self: SyncTransfer) {.async.} =
-  ## Waits for peer ids of nodes
-  ## we are reconciliating with
+  ## Waits for peer ids of nodes we are reconciliating with;
+  ## each session (re)opens that peer's transfer window.
 
   while true: # infinite loop
     let peerId = await self.localWantsRx.popFirst()
 
-    if self.inSessions.containsOrIncl(peerId):
-      self.inSessions.excl(peerId)
+    self.allowedPeers[peerId] = Moment.now() + TransferAllowancePeriod
 
   return
 
@@ -149,10 +158,15 @@ proc needsReceiverLoop(self: SyncTransfer) {.async.} =
 proc initProtocolHandler(self: SyncTransfer) =
   proc handler(conn: Connection, proto: string) {.async: (raises: [CancelledError]).} =
     while true:
-      ## removed DOS prototection until we can design something better
-      #[ if not self.inSessions.contains(conn.peerId):
-        error "unwanted peer, disconnecting", remote = conn.peerId
-        break ]#
+      ## DoS protection: only accept messages from peers we reconciled
+      ## with recently. The session signal is queued before any diff is
+      ## computed, so it always precedes the peer's first push.
+      let deadline = self.allowedPeers.getOrDefault(conn.peerId)
+      if deadline == default(Moment) or Moment.now() > deadline:
+        self.allowedPeers.del(conn.peerId)
+        total_transfer_unsolicited_disconnects.inc()
+        warn "unsolicited transfer, disconnecting", remote_peer_id = conn.peerId
+        break
 
       let readRes = catch:
         await conn.readLp(int64(DefaultMaxWakuMessageSize))

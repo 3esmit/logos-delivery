@@ -21,6 +21,7 @@ import
     waku_archive/archive,
     waku_archive/driver,
     waku_archive/common,
+    common/rate_limit/setting,
   ],
   ../testlib/[wakucore, testasync],
   ../waku_archive/archive_utils,
@@ -846,6 +847,56 @@ suite "Waku Sync: reconciliation":
 
     check needsQ.len == 0
 
+  asyncTest "one sync session per peer at a time":
+    server = await newTestWakuRecon(
+      serverSwitch, @[], @[], DefaultSyncRange, idsChannel, localWants, remoteNeeds
+    )
+    client = await newTestWakuRecon(
+      clientSwitch, @[], @[], DefaultSyncRange, idsChannel, localWants, remoteNeeds
+    )
+
+    # start two sessions towards the same peer concurrently: the session
+    # guard must reject the second while the first is still in flight
+    let fut1 = client.storeSynchronization(Opt.some(serverPeerInfo))
+    let fut2 = client.storeSynchronization(Opt.some(serverPeerInfo))
+
+    let res1 = await fut1
+    let res2 = await fut2
+
+    check:
+      res1.isOk()
+      res2.isErr()
+
+    # once the first session is done, a new one is accepted again
+    let res3 = await client.storeSynchronization(Opt.some(serverPeerInfo))
+    check res3.isOk()
+
+  asyncTest "sync requests beyond the rate limit are rejected":
+    let limit: RateLimitSetting = (1, 1.minutes)
+
+    server = await newTestWakuRecon(
+      serverSwitch,
+      @[],
+      @[],
+      DefaultSyncRange,
+      idsChannel,
+      localWants,
+      remoteNeeds,
+      rateLimitSetting = Opt.some(limit),
+    )
+    client = await newTestWakuRecon(
+      clientSwitch, @[], @[], DefaultSyncRange, idsChannel, localWants, remoteNeeds
+    )
+
+    # the first session fits the budget and is served
+    let res1 = await client.storeSynchronization(Opt.some(serverPeerInfo))
+    assert res1.isOk(), $res1.error
+
+    # an immediate second session exceeds the server's budget: the server
+    # closes the connection without processing and the sync fails
+    let res2 = await client.storeSynchronization(Opt.some(serverPeerInfo))
+    check res2.isErr()
+
 suite "Waku Sync: transfer":
   var
     serverSwitch {.threadvar.}: Switch
@@ -938,7 +989,7 @@ suite "Waku Sync: transfer":
 
     serverDriver = serverDriver.put(DefaultPubsubTopic, msgs)
 
-    # add server info to client want channel
+    # signal an active sync session with the server, opening its transfer window
     let want = serverPeerInfo.peerId
     await clientLocalWants.put(want)
 
@@ -961,8 +1012,7 @@ suite "Waku Sync: transfer":
     check:
       response.messages.len > 0
 
-  ## Disabled until we impl. DOS protection again
-  #[ asyncTest "Check the exact missing messages are received":
+  asyncTest "Check the exact missing messages are received":
     let timeSlice = calculateTimeRange()
     let timeWindow = int64(timeSlice.b) - int64(timeSlice.a)
     let (part, _) = divmod(timeWindow, 3)
@@ -992,9 +1042,32 @@ suite "Waku Sync: transfer":
     let sid1 = await clientIds.get()
     let sid2 = await clientIds.get()
 
-    let received = [sid1.hash, sid2.hash].toHashSet()
-    let expected = [hB, hC].toHashSet
+    let received = [sid1[0].hash, sid2[0].hash].toHashSet()
+    let expected = [hB, hC].toHashSet()
 
     check received == expected
 
-    check clientIds.len == 0 ]#
+    check clientIds.len == 0
+
+  asyncTest "unsolicited transfer messages are dropped":
+    let msg = fakeWakuMessage()
+    let hash = computeMessageHash(DefaultPubsubTopic, msg)
+
+    serverDriver = serverDriver.put(DefaultPubsubTopic, @[msg])
+
+    # no budget granted on the client side: reconciliation never
+    # determined we need anything from the server
+    let need = (clientPeerInfo.peerId, hash)
+    await serverRemoteNeeds.put(need)
+
+    # give time for the (rejected) transfer attempt to happen
+    await sleepAsync(500.milliseconds)
+
+    var query = ArchiveQuery()
+    query.includeData = true
+    query.hashes = @[hash]
+
+    let res = await clientArchive.findMessages(query)
+    assert res.isOk(), $res.error
+
+    check res.get().messages.len == 0

@@ -11,6 +11,7 @@ type RateLimitedProtocol* = enum
   LIGHTPUSH
   PEEREXCHG
   FILTER
+  STORESYNC
 
 type ProtocolRateLimitSettings* = Table[RateLimitedProtocol, RateLimitSetting]
 
@@ -24,10 +25,19 @@ let UnlimitedRateLimit*: RateLimitSetting = (0, 0.seconds)
 # all subscribed peers
 let FilterDefaultPerPeerRateLimit*: RateLimitSetting = (30, 1.minutes)
 
+# Store sync sessions are heavier than single queries: each one runs a full
+# range diff and may trigger message transfer. Honest peers initiate at most
+# one session per sync interval (a minute or more), so this leaves generous
+# headroom while bounding what a hostile peer can demand for free.
+let StoreSyncDefaultRateLimit*: RateLimitSetting = (30, 5.minutes)
+
 # For being used under GC-safe condition must use threadvar
 var DefaultProtocolRateLimit* {.threadvar.}: ProtocolRateLimitSettings
-DefaultProtocolRateLimit =
-  {GLOBAL: UnlimitedRateLimit, FILTER: FilterDefaultPerPeerRateLimit}.toTable()
+DefaultProtocolRateLimit = {
+  GLOBAL: UnlimitedRateLimit,
+  FILTER: FilterDefaultPerPeerRateLimit,
+  STORESYNC: StoreSyncDefaultRateLimit,
+}.toTable()
 
 proc isUnlimited*(t: RateLimitSetting): bool {.inline.} =
   return t.volume <= 0 or t.period <= 0.seconds
@@ -54,6 +64,8 @@ proc translate(sProtocol: string): RateLimitedProtocol {.raises: [ValueError].} 
     return PEEREXCHG
   of "filter":
     return FILTER
+  of "storesync":
+    return STORESYNC
   else:
     raise newException(ValueError, "Unknown protocol definition: " & sProtocol)
 
@@ -83,7 +95,7 @@ proc parse*(
   ## group4: Unit of period - only h:hour, m:minute, s:second, ms:millisecond allowed
   ## whitespaces are allowed lazily
   const parseRegex =
-    """^\s*((store|storev3|lightpush|px|filter)\s*:)?\s*(\d+)\s*\/\s*(\d+)\s*(s|h|m|ms)\s*$"""
+    """^\s*((storesync|store|storev3|lightpush|px|filter)\s*:)?\s*(\d+)\s*\/\s*(\d+)\s*(s|h|m|ms)\s*$"""
   const regexParseSize = re2(parseRegex)
   for settingStr in settings:
     let aSetting = settingStr.toLower()
@@ -116,6 +128,7 @@ proc parse*(
   # due it is taken for protocols not defined in the list - thus those will not apply accidentally wrong settings.
   discard settingsTable.hasKeyOrPut(GLOBAL, UnlimitedRateLimit)
   discard settingsTable.hasKeyOrPut(FILTER, FilterDefaultPerPeerRateLimit)
+  discard settingsTable.hasKeyOrPut(STORESYNC, StoreSyncDefaultRateLimit)
 
   return ok(settingsTable)
 

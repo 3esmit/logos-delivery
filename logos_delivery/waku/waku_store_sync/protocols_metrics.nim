@@ -20,6 +20,9 @@ declarePublicCounter total_bytes_exchanged,
 declarePublicCounter total_transfer_messages_rejected,
   "number of received transfer messages dropped by validation"
 
+declarePublicCounter total_transfer_unsolicited_disconnects,
+  "number of transfer connections dropped because the peer had no recent reconciliation session"
+
 declarePublicCounter total_transfer_messages_unverified,
   "number of received transfer messages accepted without proof verification (archives do not persist RLN proofs)"
 

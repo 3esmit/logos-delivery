@@ -16,6 +16,7 @@ import
   ../common/nimchronos,
   ../common/protobuf,
   ../common/paging,
+  ../common/rate_limit/request_limiter,
   ../waku_enr,
   ../waku_core/codecs,
   ../waku_core/time,
@@ -37,6 +38,14 @@ logScope:
 
 const DefaultStorageCap = 50_000
 
+# Reconciliation payloads grow with the number of differences: the range
+# fan-out plus item-set elements come to roughly 40 B per difference, so a
+# round reconciling a 300k-message diff is on the order of 12 MiB. 64 MiB
+# clears the largest legitimate rounds the RLN-capped window can produce
+# while still bounding what one length prefix can make us allocate
+# (readLp(int.high) would accept an arbitrary claim).
+const MaxSyncPayloadSize = 64 * 1024 * 1024
+
 type SyncReconciliation* = ref object of LPProtocol
   pubsubTopics: HashSet[PubsubTopic] # Empty set means accept all. See spec.
   contentTopics: HashSet[ContentTopic] # Empty set means accept all. See spec.
@@ -50,11 +59,18 @@ type SyncReconciliation* = ref object of LPProtocol
   # Receive IDs from transfer protocol for storage
   idsRx: AsyncQueue[(SyncID, PubsubTopic, ContentTopic)]
 
-  # Send Hashes to transfer protocol for reception
-  localWantsTx: AsyncQueue[(PeerId)]
+  # Signal to the transfer protocol which peers have a sync session,
+  # opening a bounded window in which their transfers are accepted
+  localWantsTx: AsyncQueue[PeerId]
 
   # Send Hashes to transfer protocol for transmission
   remoteNeedsTx: AsyncQueue[(PeerId, WakuMessageHash)]
+
+  # DoS protection: bound how often peers can start sync sessions
+  requestRateLimiter: RequestRateLimiter
+
+  # Peers with a sync session in flight; one session per peer at a time
+  activeSessions: HashSet[PeerId]
 
   # params
   syncInterval: timer.Duration # Time between each synchronization attempt
@@ -185,12 +201,14 @@ proc processRequest(
     roundTrips = 0
     diffs = 0
 
-  # Signal to transfer protocol that this reconciliation is starting
-  await self.localWantsTx.addLast(conn.peerId)
+  # Open the transfer window for this peer: messages found missing during
+  # this session will be pushed by the peer over the transfer protocol,
+  # possibly well after the session itself ends.
+  self.localWantsTx.addLastNoWait(conn.peerId)
 
   while true:
     let readRes = catch:
-      await conn.readLp(int.high)
+      await conn.readLp(MaxSyncPayloadSize)
 
     let buffer: seq[byte] = readRes.valueOr:
       await conn.close()
@@ -264,9 +282,6 @@ proc processRequest(
 
     continue
 
-  # Signal to transfer protocol that this reconciliation is done
-  await self.localWantsTx.addLast(conn.peerId)
-
   reconciliation_roundtrips.observe(roundTrips)
   reconciliation_differences.observe(diffs)
 
@@ -329,6 +344,12 @@ proc storeSynchronization*(
   let peer = peerInfo.valueOr:
     self.peerManager.selectPeer(WakuReconciliationCodec).valueOr:
       return err("no suitable peer found for sync")
+
+  if self.activeSessions.containsOrIncl(peer.peerId):
+    return err("sync session already in progress with peer " & $peer.peerId)
+
+  defer:
+    self.activeSessions.excl(peer.peerId)
 
   let connOpt = await self.peerManager.dialPeer(peer, WakuReconciliationCodec)
 
@@ -409,6 +430,7 @@ proc new*(
     idsRx: AsyncQueue[(SyncID, PubsubTopic, ContentTopic)],
     localWantsTx: AsyncQueue[PeerId],
     remoteNeedsTx: AsyncQueue[(PeerId, WakuMessageHash)],
+    rateLimitSetting: Opt[RateLimitSetting] = Opt.none(RateLimitSetting),
 ): Future[Result[T, string]] {.async.} =
   let res = await initFillStorage(syncRange, wakuArchive)
   let storage =
@@ -429,17 +451,33 @@ proc new*(
     idsRx: idsRx,
     localWantsTx: localWantsTx,
     remoteNeedsTx: remoteNeedsTx,
+    requestRateLimiter: newRequestRateLimiter(rateLimitSetting),
   )
 
   proc handler(conn: Connection, proto: string) {.async: (raises: [CancelledError]).} =
-    try:
-      (await sync.processRequest(conn)).isOkOr:
-        error "request processing error", error = error
-    except CatchableError:
-      error "exception in reconciliation handler", error = getCurrentExceptionMsg()
+    sync.requestRateLimiter.checkUsageLimit(WakuReconciliationCodec, conn):
+      if sync.activeSessions.containsOrIncl(conn.peerId):
+        info "rejecting sync request: session already in progress", remote = conn.peerId
+        await conn.close()
+        return
+
+      defer:
+        sync.activeSessions.excl(conn.peerId)
+
+      try:
+        (await sync.processRequest(conn)).isOkOr:
+          error "request processing error", error = error
+      except CatchableError:
+        error "exception in reconciliation handler", error = getCurrentExceptionMsg()
+    do:
+      info "sync request rejected due rate limit exceeded",
+        remote = conn.peerId, limit = $sync.requestRateLimiter.setting
+      await conn.close()
 
   sync.handler = handler
   sync.codec = WakuReconciliationCodec
+
+  setServiceLimitMetric(WakuReconciliationCodec, rateLimitSetting)
 
   info "Store Reconciliation protocol initialized",
     sync_range = syncRange, sync_interval = syncInterval, relay_jitter = relayJitter

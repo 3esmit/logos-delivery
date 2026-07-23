@@ -376,7 +376,7 @@ proc mountStoreSync*(
     return err("store sync requires a mounted archive")
 
   let idsChannel = newAsyncQueue[(SyncID, PubsubTopic, ContentTopic)](0)
-  let wantsChannel = newAsyncQueue[(PeerId)](0)
+  let wantsChannel = newAsyncQueue[PeerId](0)
   let needsChannel = newAsyncQueue[(PeerId, WakuMessageHash)](0)
 
   let pubsubTopics = shards.mapIt($RelayShard(clusterId: cluster, shardId: it))
@@ -384,9 +384,17 @@ proc mountStoreSync*(
   node.storeSyncRange = storeSyncRange.seconds
 
   let recon = ?await SyncReconciliation.new(
-    pubsubTopics, contentTopics, node.peerManager, node.wakuArchive,
-    storeSyncRange.seconds, storeSyncInterval.seconds, storeSyncRelayJitter.seconds,
-    idsChannel, wantsChannel, needsChannel,
+    pubsubTopics,
+    contentTopics,
+    node.peerManager,
+    node.wakuArchive,
+    storeSyncRange.seconds,
+    storeSyncInterval.seconds,
+    storeSyncRelayJitter.seconds,
+    idsChannel,
+    wantsChannel,
+    needsChannel,
+    rateLimitSetting = Opt.some(node.rateLimitSettings.getSetting(STORESYNC)),
   )
 
   node.wakuStoreReconciliation = recon

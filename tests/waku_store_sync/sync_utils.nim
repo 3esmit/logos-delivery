@@ -1,4 +1,4 @@
-import std/random, chronos, chronicles
+import std/random, results, chronos, chronicles
 
 import
   logos_delivery/waku/[
@@ -7,6 +7,7 @@ import
     waku_store_sync/common,
     waku_store_sync/reconciliation,
     waku_store_sync/transfer,
+    common/rate_limit/setting,
   ],
   ../testlib/wakucore
 
@@ -28,6 +29,7 @@ proc newTestWakuRecon*(
     idsRx: AsyncQueue[(SyncID, PubsubTopic, ContentTopic)],
     wantsTx: AsyncQueue[PeerId],
     needsTx: AsyncQueue[(PeerId, WakuMessageHash)],
+    rateLimitSetting: Opt[RateLimitSetting] = Opt.none(RateLimitSetting),
 ): Future[SyncReconciliation] {.async.} =
   let peerManager = PeerManager.new(switch)
 
@@ -41,6 +43,7 @@ proc newTestWakuRecon*(
     idsRx = idsRx,
     localWantsTx = wantsTx,
     remoteNeedsTx = needsTx,
+    rateLimitSetting = rateLimitSetting,
   )
 
   let proto = res.get()

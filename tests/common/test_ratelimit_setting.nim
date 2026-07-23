@@ -47,23 +47,46 @@ suite "RateLimitSetting":
     let res4 = ProtocolRateLimitSettings.parse(@[test4])
     let res5 = ProtocolRateLimitSettings.parse(@[test5])
 
+    let expSync = StoreSyncDefaultRateLimit
+
     check:
       res1.isOk()
-      res1.get() == {GLOBAL: exp1, FILTER: FilterDefaultPerPeerRateLimit}.toTable()
+      res1.get() ==
+        {GLOBAL: exp1, FILTER: FilterDefaultPerPeerRateLimit, STORESYNC: expSync}.toTable()
       res2.isOk()
       res2.get() ==
-        {GLOBAL: expU, FILTER: FilterDefaultPerPeerRateLimit, STOREV3: exp2}.toTable()
+        {
+          GLOBAL: expU,
+          FILTER: FilterDefaultPerPeerRateLimit,
+          STORESYNC: expSync,
+          STOREV3: exp2,
+        }.toTable()
       res2b.isOk()
       res2b.get() ==
-        {GLOBAL: expU, FILTER: FilterDefaultPerPeerRateLimit, STOREV3: exp2b}.toTable()
+        {
+          GLOBAL: expU,
+          FILTER: FilterDefaultPerPeerRateLimit,
+          STORESYNC: expSync,
+          STOREV3: exp2b,
+        }.toTable()
       res3.isOk()
       res3.get() ==
-        {GLOBAL: expU, FILTER: FilterDefaultPerPeerRateLimit, LIGHTPUSH: exp3}.toTable()
+        {
+          GLOBAL: expU,
+          FILTER: FilterDefaultPerPeerRateLimit,
+          STORESYNC: expSync,
+          LIGHTPUSH: exp3,
+        }.toTable()
       res4.isOk()
       res4.get() ==
-        {GLOBAL: expU, FILTER: FilterDefaultPerPeerRateLimit, PEEREXCHG: exp4}.toTable()
+        {
+          GLOBAL: expU,
+          FILTER: FilterDefaultPerPeerRateLimit,
+          STORESYNC: expSync,
+          PEEREXCHG: exp4,
+        }.toTable()
       res5.isOk()
-      res5.get() == {GLOBAL: expU, FILTER: exp5}.toTable()
+      res5.get() == {GLOBAL: expU, FILTER: exp5, STORESYNC: expSync}.toTable()
 
   test "Parse rate limit setting - err":
     let test1 = "10/2d"
@@ -95,6 +118,7 @@ suite "RateLimitSetting":
     let exp1 = {
       GLOBAL: (10, 2.minutes),
       FILTER: FilterDefaultPerPeerRateLimit,
+      STORESYNC: StoreSyncDefaultRateLimit,
       LIGHTPUSH: (2, 2.milliseconds),
       STOREV3: (3, 3.seconds),
     }.toTable()
@@ -115,6 +139,7 @@ suite "RateLimitSetting":
       STOREV3: (3, 3.seconds),
       FILTER: (4, 42.milliseconds),
       PEEREXCHG: (10, 10.hours),
+      STORESYNC: StoreSyncDefaultRateLimit,
     }.toTable()
 
     let res2 = ProtocolRateLimitSettings.parse(test2)
@@ -125,7 +150,10 @@ suite "RateLimitSetting":
 
     let test3 = @["store:3/3s", "storev3:4/42ms", "storev3:5/5s", "storev3:6/6s"]
     let exp3 = {
-      GLOBAL: expU, FILTER: FilterDefaultPerPeerRateLimit, STOREV3: (6, 6.seconds)
+      GLOBAL: expU,
+      FILTER: FilterDefaultPerPeerRateLimit,
+      STORESYNC: StoreSyncDefaultRateLimit,
+      STOREV3: (6, 6.seconds),
     }.toTable()
 
     let res3 = ProtocolRateLimitSettings.parse(test3)
@@ -136,7 +164,11 @@ suite "RateLimitSetting":
       res3.get().getSetting(LIGHTPUSH) == expU
 
     let test4 = newSeq[string](0)
-    let exp4 = {GLOBAL: expU, FILTER: FilterDefaultPerPeerRateLimit}.toTable()
+    let exp4 = {
+      GLOBAL: expU,
+      FILTER: FilterDefaultPerPeerRateLimit,
+      STORESYNC: StoreSyncDefaultRateLimit,
+    }.toTable()
 
     let res4 = ProtocolRateLimitSettings.parse(test4)
 

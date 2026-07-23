@@ -741,7 +741,7 @@ hence would have reachability issues.""",
       desc:
         "Rate limit settings for different protocols." &
         "Format: protocol:volume/period<unit>" &
-        " Where 'protocol' can be one of: <store|storev3|lightpush|px|filter> if not defined it means a global setting" &
+        " Where 'protocol' can be one of: <store|storev3|storesync|lightpush|px|filter> if not defined it means a global setting" &
         " 'volume' and period must be an integer value. " &
         " 'unit' must be one of <h|m|s|ms> - hours, minutes, seconds, milliseconds respectively. " &
         "Argument may be repeated.",
