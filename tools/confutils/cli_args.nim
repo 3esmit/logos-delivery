@@ -451,6 +451,13 @@ hence would have reachability issues.""",
       name: "store-sync-db-url"
     .}: string
 
+    storeSyncRequireProof* {.
+      desc:
+        "Reject sync-transferred messages that carry no RLN proof. Only effective when RLN is enabled; keep false until every peer persists and serves proofs.",
+      defaultValue: false,
+      name: "store-sync-require-proof"
+    .}: bool
+
     ## Filter config
     filter* {.
       desc: "Enable filter protocol: true|false", defaultValue: true, name: "filter"
@@ -1138,6 +1145,7 @@ proc toWakuConf*(n: WakuNodeConf): ConfResult[WakuConf] =
   b.storeSyncConf.withRangeSec(n.storeSyncRange)
   b.storeSyncConf.withRelayJitterSec(n.storeSyncRelayJitter)
   b.storeSyncConf.withDbUrl(n.storeSyncDbUrl)
+  b.storeSyncConf.withRequireProof(n.storeSyncRequireProof)
 
   if n.mix.isSome():
     b.mixConf.withEnabled(n.mix.get())

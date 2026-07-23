@@ -40,14 +40,14 @@ type PostgresDriver* = ref object of ArchiveDriver
 const InsertRowStmtName = "InsertRow"
 const InsertRowStmtDefinition =
   """INSERT INTO messages (id, messageHash, pubsubTopic, contentTopic, payload,
-  version, timestamp, meta) VALUES ($1, $2, $3, $4, $5, $6, $7, CASE WHEN $8 = '' THEN NULL ELSE $8 END) ON CONFLICT DO NOTHING;"""
+  version, timestamp, meta, proof) VALUES ($1, $2, $3, $4, $5, $6, $7, CASE WHEN $8 = '' THEN NULL ELSE $8 END, CASE WHEN $9 = '' THEN NULL ELSE $9 END) ON CONFLICT DO NOTHING;"""
 
 const InsertRowInMessagesLookupStmtName = "InsertRowMessagesLookup"
 const InsertRowInMessagesLookupStmtDefinition =
   """INSERT INTO messages_lookup (messageHash, timestamp) VALUES ($1, $2) ON CONFLICT DO NOTHING;"""
 
 const SelectClause =
-  """SELECT messageHash, pubsubTopic, contentTopic, payload, version, timestamp, meta FROM messages """
+  """SELECT messageHash, pubsubTopic, contentTopic, payload, version, timestamp, meta, proof FROM messages """
 
 const SelectNoCursorAscStmtName = "SelectWithoutCursorAsc"
 const SelectNoCursorAscStmtDef =
@@ -245,6 +245,7 @@ proc rowCallbackImpl(
       rawVersion: string
       rawTimestamp: string
       rawMeta: string
+      rawProof: string
 
       hashHex: string
       msgHash: WakuMessageHash
@@ -256,6 +257,7 @@ proc rowCallbackImpl(
       version: uint
       timestamp: Timestamp
       meta: string
+      proof: string
       wakuMessage: WakuMessage
 
     rawHash = $(pqgetvalue(pqResult, iRow, 0))
@@ -265,6 +267,7 @@ proc rowCallbackImpl(
     rawVersion = $(pqgetvalue(pqResult, iRow, 4))
     rawTimestamp = $(pqgetvalue(pqResult, iRow, 5))
     rawMeta = $(pqgetvalue(pqResult, iRow, 6))
+    rawProof = $(pqgetvalue(pqResult, iRow, 7))
 
     trace "db output",
       rawHash, pubSubTopic, contentTopic, rawPayload, rawVersion, rawTimestamp, rawMeta
@@ -275,6 +278,7 @@ proc rowCallbackImpl(
       version = parseUInt(rawVersion)
       timestamp = parseInt(rawTimestamp)
       meta = parseHexStr(rawMeta)
+      proof = parseHexStr(rawProof)
     except ValueError:
       error "could not parse correctly", error = getCurrentExceptionMsg()
 
@@ -285,6 +289,7 @@ proc rowCallbackImpl(
     wakuMessage.version = uint32(version)
     wakuMessage.timestamp = timestamp
     wakuMessage.meta = @(meta.toOpenArrayByte(0, meta.high))
+    wakuMessage.proof = @(proof.toOpenArrayByte(0, proof.high))
 
     outRows.add((msgHash, pubSubTopic, wakuMessage))
 
@@ -301,6 +306,7 @@ method put*(
   let version = $message.version
   let timestamp = $message.timestamp
   let meta = byteutils.toHex(message.meta)
+  let proof = byteutils.toHex(message.proof)
 
   trace "put PostgresDriver",
     messageHash, contentTopic, payload, version, timestamp, meta
@@ -316,7 +322,7 @@ method put*(
       InsertRowStmtDefinition,
       @[
         fakeId, messageHash, pubsubTopic, contentTopic, payload, version, timestamp,
-        meta,
+        meta, proof,
       ],
       @[
         int32(fakeId.len),
@@ -327,8 +333,19 @@ method put*(
         int32(version.len),
         int32(timestamp.len),
         int32(meta.len),
+        int32(proof.len),
       ],
-      @[int32(0), int32(0), int32(0), int32(0), int32(0), int32(0), int32(0), int32(0)],
+      @[
+        int32(0),
+        int32(0),
+        int32(0),
+        int32(0),
+        int32(0),
+        int32(0),
+        int32(0),
+        int32(0),
+        int32(0),
+      ],
     )
   ).isOkOr:
     return err("could not put msg in messages table: " & $error)
@@ -356,7 +373,7 @@ method getAllMessages*(
 
   (
     await s.readConnPool.pgQuery(
-      """SELECT messageHash, pubsubTopic, contentTopic, payload, version, timestamp, meta
+      """SELECT messageHash, pubsubTopic, contentTopic, payload, version, timestamp, meta, proof
         FROM messages
         ORDER BY timestamp ASC, messageHash ASC""",
       newSeq[string](0),
@@ -823,7 +840,7 @@ proc getMessagesByMessageHashes(
       {hashes}
     )
   )
-  SELECT m.messageHash, pubsubTopic, contentTopic, payload, version, m.timestamp, meta
+  SELECT m.messageHash, pubsubTopic, contentTopic, payload, version, m.timestamp, meta, proof
   FROM messages m
   INNER JOIN
     messages_lookup l

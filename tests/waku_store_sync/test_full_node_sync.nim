@@ -157,6 +157,29 @@ suite "Waku Sync: full node miss recovery":
       await nodeA.hasMessage(hashB)
       await nodeB.hasMessage(hashA)
 
+  asyncTest "synced messages keep the original author's proof":
+    let proof = @[byte 4, 2, 4, 2]
+    let msg = fakeWakuMessage(contentTopic = DefaultContentTopic, proof = proof)
+    let hash = computeMessageHash(DefaultPubsubTopic, msg)
+
+    nodeA.insertMessage(msg)
+
+    let res = await nodeB.recon.storeSynchronization(Opt.some(nodeA.peerInfo))
+    assert res.isOk(), $res.error
+
+    await sleepAsync(1.seconds)
+
+    var query = ArchiveQuery()
+    query.includeData = true
+    query.hashes = @[hash]
+
+    let response = (await nodeB.archive.findMessages(query)).valueOr:
+      raiseAssert $error
+
+    check:
+      response.messages.len == 1
+      response.messages[0].proof == proof
+
   asyncTest "messages failing transfer validation are not archived":
     await nodeB.stop()
 

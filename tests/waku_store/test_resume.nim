@@ -7,6 +7,7 @@ import
     node/peer_manager,
     waku_node,
     waku_core,
+    waku_core/message/digest,
     waku_store/resume,
     waku_store/common,
     waku_archive/driver,
@@ -125,7 +126,7 @@ suite "Store Resume - End to End":
     ## would be silently dropped.
     let hourAgo = Timestamp(getNowInNanosecondTime() - 3_600_000_000_000)
     let oldMessages = @[
-      fakeWakuMessage(@[byte 10], ts = hourAgo),
+      fakeWakuMessage(@[byte 10], ts = hourAgo, proof = @[byte 9, 9, 9]),
       fakeWakuMessage(@[byte 11], ts = hourAgo + 1),
       fakeWakuMessage(@[byte 12], ts = hourAgo + 2),
       fakeWakuMessage(@[byte 13], ts = hourAgo + 3),
@@ -148,3 +149,14 @@ suite "Store Resume - End to End":
 
     check:
       countRes.get() == 15
+
+    # the original author's proof survives the store -> resume -> archive trip
+    let proofHash = computeMessageHash(DefaultPubsubTopic, oldMessages[0])
+    let rows = (
+      await clientDriver.getMessages(includeData = true, hashes = @[proofHash])
+    ).valueOr:
+      raiseAssert $error
+
+    check:
+      rows.len == 1
+      rows[0][2].proof == @[byte 9, 9, 9]

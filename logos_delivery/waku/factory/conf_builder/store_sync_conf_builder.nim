@@ -18,6 +18,7 @@ type StoreSyncConfBuilder* = object
   intervalSec*: Opt[uint32]
   relayJitterSec*: Opt[uint32]
   dbUrl*: Opt[string]
+  requireProof*: Opt[bool]
 
 proc init*(T: type StoreSyncConfBuilder): StoreSyncConfBuilder =
   StoreSyncConfBuilder()
@@ -36,6 +37,9 @@ proc withRelayJitterSec*(b: var StoreSyncConfBuilder, relayJitterSec: uint32) =
 
 proc withDbUrl*(b: var StoreSyncConfBuilder, dbUrl: string) =
   b.dbUrl = Opt.some(dbUrl)
+
+proc withRequireProof*(b: var StoreSyncConfBuilder, requireProof: bool) =
+  b.requireProof = Opt.some(requireProof)
 
 proc build*(b: StoreSyncConfBuilder): Result[Opt[StoreSyncConf], string] =
   if not b.enabled.get(DefaultStoreSyncEnabled):
@@ -64,6 +68,7 @@ proc build*(b: StoreSyncConfBuilder): Result[Opt[StoreSyncConf], string] =
         intervalSec: b.intervalSec.get(),
         relayJitterSec: b.relayJitterSec.get(),
         dbUrl: dbUrl,
+        requireProof: b.requireProof.get(false),
       )
     )
   )

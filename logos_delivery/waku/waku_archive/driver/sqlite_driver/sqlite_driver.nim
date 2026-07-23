@@ -57,6 +57,7 @@ method put*(
       int64(message.version),
       message.timestamp,
       message.meta,
+      message.proof,
     )
   )
 

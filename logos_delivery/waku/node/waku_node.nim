@@ -371,6 +371,7 @@ proc mountStoreSync*(
     storeSyncRange: uint32,
     storeSyncInterval: uint32,
     storeSyncRelayJitter: uint32,
+    storeSyncRequireProof: bool = false,
 ): Future[Result[void, string]] {.async.} =
   if node.wakuArchive.isNil():
     return err("store sync requires a mounted archive")
@@ -412,16 +413,20 @@ proc mountStoreSync*(
     ## RLN mounts after store sync (but before the switch starts accepting
     ## connections), so capture the node and check at call time; nil rln
     ## means RLN is not configured on this network. Freshness is not
-    ## checked: synced messages are old by design. Known gaps: archives do
-    ## not persist RLN proofs, so archive-served messages arrive proofless
-    ## and can only be counted, not verified (enforcement needs proof
-    ## persistence); and proofs built against roots older than the
-    ## acceptable root window are rejected, bounding history sync across
-    ## heavy membership churn.
+    ## checked: synced messages are old by design. Archives persist the
+    ## original author's proof, so transferred history is re-verified as
+    ## it arrives — the node's first verification of a message it missed
+    ## on relay. Proofless messages are accepted (and counted) only while
+    ## requireProof is off: the rollout lever until the whole fleet
+    ## persists and serves proofs. Proofs built against roots older than
+    ## the acceptable root window are rejected, bounding history sync
+    ## across heavy membership churn.
     if node.rln.isNil():
       return true
 
     if msg.proof.len == 0:
+      if storeSyncRequireProof:
+        return false
       total_transfer_messages_unverified.inc()
       return true
 

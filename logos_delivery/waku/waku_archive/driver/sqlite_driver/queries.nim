@@ -15,7 +15,7 @@ type SqlQueryStr = string
 
 proc queryRowWakuMessageCallback(
     s: ptr sqlite3_stmt,
-    contentTopicCol, payloadCol, versionCol, timestampCol, metaCol: cint,
+    contentTopicCol, payloadCol, versionCol, timestampCol, metaCol, proofCol: cint,
 ): WakuMessage =
   let
     topic = cast[ptr UncheckedArray[byte]](sqlite3_column_blob(s, contentTopicCol))
@@ -24,13 +24,16 @@ proc queryRowWakuMessageCallback(
 
     p = cast[ptr UncheckedArray[byte]](sqlite3_column_blob(s, payloadCol))
     m = cast[ptr UncheckedArray[byte]](sqlite3_column_blob(s, metaCol))
+    pr = cast[ptr UncheckedArray[byte]](sqlite3_column_blob(s, proofCol))
 
     payloadLength = sqlite3_column_bytes(s, payloadCol)
     metaLength = sqlite3_column_bytes(s, metaCol)
+    proofLength = sqlite3_column_bytes(s, proofCol)
     payload = @(toOpenArray(p, 0, payloadLength - 1))
     version = sqlite3_column_int64(s, versionCol)
     timestamp = sqlite3_column_int64(s, timestampCol)
     meta = @(toOpenArray(m, 0, metaLength - 1))
+    proof = @(toOpenArray(pr, 0, proofLength - 1))
 
   return WakuMessage(
     contentTopic: ContentTopic(contentTopic),
@@ -38,6 +41,7 @@ proc queryRowWakuMessageCallback(
     version: uint32(version),
     timestamp: Timestamp(timestamp),
     meta: meta,
+    proof: proof,
   )
 
 proc queryRowTimestampCallback(s: ptr sqlite3_stmt, timestampCol: cint): Timestamp =
@@ -74,7 +78,7 @@ proc createTableQuery(table: string): SqlQueryStr =
   "CREATE TABLE IF NOT EXISTS " & table & " (" &
     " messageHash BLOB NOT NULL PRIMARY KEY," & " pubsubTopic BLOB NOT NULL," &
     " contentTopic BLOB NOT NULL," & " payload BLOB," & " version INTEGER NOT NULL," &
-    " timestamp INTEGER NOT NULL," & " meta BLOB" & ") WITHOUT ROWID;"
+    " timestamp INTEGER NOT NULL," & " meta BLOB," & " proof BLOB" & ") WITHOUT ROWID;"
 
 proc createTable*(db: SqliteDatabase): DatabaseResult[void] =
   let query = createTableQuery(DbTable)
@@ -101,13 +105,13 @@ proc createOldestMessageTimestampIndex*(db: SqliteDatabase): DatabaseResult[void
 
 ## Insert message
 type InsertMessageParams* =
-  (seq[byte], seq[byte], seq[byte], seq[byte], int64, Timestamp, seq[byte])
+  (seq[byte], seq[byte], seq[byte], seq[byte], int64, Timestamp, seq[byte], seq[byte])
 
 proc insertMessageQuery(table: string): SqlQueryStr =
   return
     "INSERT INTO " & table &
-    "(messageHash, pubsubTopic, contentTopic, payload, version, timestamp, meta)" &
-    " VALUES (?, ?, ?, ?, ?, ?, ?);"
+    "(messageHash, pubsubTopic, contentTopic, payload, version, timestamp, meta, proof)" &
+    " VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
 
 proc prepareInsertMessageStmt*(
     db: SqliteDatabase
@@ -204,7 +208,7 @@ proc deleteOldestMessagesNotWithinLimit*(
 
 proc selectAllMessagesQuery(table: string): SqlQueryStr =
   return
-    "SELECT messageHash, pubsubTopic, contentTopic, payload, version, timestamp, meta" &
+    "SELECT messageHash, pubsubTopic, contentTopic, payload, version, timestamp, meta, proof" &
     " FROM " & table & " ORDER BY timestamp ASC"
 
 proc selectAllMessages*(
@@ -223,6 +227,7 @@ proc selectAllMessages*(
         versionCol = 4,
         timestampCol = 5,
         metaCol = 6,
+        proofCol = 7,
       )
 
     rows.add((hash, pubsubTopic, wakuMessage))
@@ -445,7 +450,7 @@ proc selectMessagesWithLimitQuery(
   var query: string
 
   query =
-    "SELECT messageHash, pubsubTopic, contentTopic, payload, version, timestamp, meta"
+    "SELECT messageHash, pubsubTopic, contentTopic, payload, version, timestamp, meta, proof"
   query &= " FROM " & table
 
   if where.isSome():
@@ -509,6 +514,7 @@ proc selectMessagesByStoreQueryWithLimit*(
         versionCol = 4,
         timestampCol = 5,
         metaCol = 6,
+        proofCol = 7,
       )
 
     rows.add((hash, pubsubTopic, message))

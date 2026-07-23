@@ -260,6 +260,7 @@ proc setupProtocols(
       await node.mountStoreSync(
         conf.clusterId, conf.subscribeShards, conf.contentTopics,
         confStoreSync.rangeSec, confStoreSync.intervalSec, confStoreSync.relayJitterSec,
+        confStoreSync.requireProof,
       )
     ).isOkOr:
       return err("failed to mount waku store sync protocol: " & $error)
@@ -283,7 +284,9 @@ proc setupProtocols(
       conf.storeSyncConf.isSome():
     # sync-enabled full nodes track last-online so the startup catch-up can
     # choose between neighbour reconciliation and store resume
-    node.setupStoreResume()
+    let resumeRequireProof =
+      conf.storeSyncConf.isSome() and conf.storeSyncConf.get().requireProof
+    node.setupStoreResume(requireProof = resumeRequireProof)
 
   if conf.shardingConf.kind == AutoSharding:
     node.mountAutoSharding(conf.clusterId, conf.shardingConf.numShardsInCluster).isOkOr:

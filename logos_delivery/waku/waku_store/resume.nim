@@ -39,6 +39,10 @@ type
     ## Feeds a resume-fetched message into the reconciliation storage so
     ## peers are not asked again for messages the store already provided.
 
+  ResumeValidator* = proc(msg: WakuMessage): Future[bool] {.gcsafe, raises: [].}
+    ## Returns false when a resume-fetched message must be dropped
+    ## (e.g. failed RLN proof verification).
+
   StoreResume* = ref object
     handle: Future[void]
 
@@ -73,6 +77,7 @@ proc initTransferHandler(
     wakuArchive: WakuArchive,
     wakuStoreClient: WakuStoreClient,
     reconIngress: Opt[ReconciliationIngress],
+    msgValidator: Opt[ResumeValidator],
 ) =
   # guard clauses to prevent faulty callback
   if self.peerManager.isNil():
@@ -117,6 +122,21 @@ proc initTransferHandler(
             msg = kv.message.get()
             msgHash = computeMessageHash(pubsubTopic, msg)
 
+          # Same trust rule as the sync transfer: resume-fetched history
+          # is validated (RLN proof of the original author) before it is
+          # archived, since a store node could also serve invented history.
+          if msgValidator.isSome():
+            let validRes = catch:
+              await msgValidator.get()(msg)
+
+            let valid = validRes.valueOr:
+              error "resume message validation error", error = error.msg
+              continue
+
+            if not valid:
+              warn "resume message failed validation, dropping", msg_hash = msgHash
+              continue
+
           # Catch-up messages are older than the archive's live-traffic
           # freshness window by definition, so they must enter through the
           # sync ingress, which skips that validation (same path the
@@ -147,6 +167,7 @@ proc new*(
     wakuArchive: WakuArchive,
     wakuStoreClient: WakuStoreClient,
     reconIngress: Opt[ReconciliationIngress] = Opt.none(ReconciliationIngress),
+    msgValidator: Opt[ResumeValidator] = Opt.none(ResumeValidator),
 ): Result[T, string] =
   info "initializing store resume"
 
@@ -159,7 +180,7 @@ proc new*(
 
   let resume = StoreResume(db: db, replaceStmt: replaceStmt, peerManager: peerManager)
 
-  resume.initTransferHandler(wakuArchive, wakuStoreClient, reconIngress)
+  resume.initTransferHandler(wakuArchive, wakuStoreClient, reconIngress, msgValidator)
 
   return ok(resume)
 

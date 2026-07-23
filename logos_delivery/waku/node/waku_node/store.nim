@@ -24,6 +24,7 @@ import
   ../../waku_store/common as store_common,
   ../../waku_store/resume,
   ../../waku_store_sync/reconciliation,
+  ../../rln,
   ../peer_manager,
   ../../common/rate_limit/setting,
   ../../waku_archive
@@ -151,7 +152,7 @@ proc query*(
 
   return ok(response)
 
-proc setupStoreResume*(node: WakuNode) =
+proc setupStoreResume*(node: WakuNode, requireProof: bool = false) =
   # Resume-fetched messages also feed reconciliation, so the next sync
   # round does not re-request history the store already provided. The
   # reconciliation protocol may mount after resume is set up; check at
@@ -162,11 +163,26 @@ proc setupStoreResume*(node: WakuNode) =
     if not node.wakuStoreReconciliation.isNil():
       node.wakuStoreReconciliation.messageIngress(msgHash, pubsubTopic, msg)
 
+  # Same trust rule as the sync transfer: re-verify the original author's
+  # RLN proof on resume-fetched history (a store node could also serve
+  # invented history). RLN may mount after resume is set up; check at
+  # call time. nil rln means RLN is not configured on this network.
+  let msgValidator: ResumeValidator = proc(msg: WakuMessage): Future[bool] {.async.} =
+    if node.rln.isNil():
+      return true
+
+    if msg.proof.len == 0:
+      return not requireProof
+
+    let res = await node.rln.validateMessage(msg, checkFreshness = false)
+    return res == MessageValidationResult.Valid
+
   node.wakuStoreResume = StoreResume.new(
     node.peerManager,
     node.wakuArchive,
     node.wakuStoreClient,
     reconIngress = Opt.some(reconIngress),
+    msgValidator = Opt.some(msgValidator),
   ).valueOr:
     error "Failed to setup Store Resume", error = $error
     return

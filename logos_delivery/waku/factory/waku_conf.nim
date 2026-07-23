@@ -58,6 +58,9 @@ type StoreSyncConf* {.requiresInit.} = object
   dbUrl*: string
     ## Backs reconciliation & transfer with a small bounded archive
     ## when the store service is not enabled. Ignored otherwise.
+  requireProof*: bool
+    ## Reject synced messages that carry no RLN proof. Only effective
+    ## when RLN is enabled; keep false until the fleet persists proofs.
 
 type MixConf* = ref object
   mixKey*: Curve25519Key
