@@ -74,7 +74,7 @@ requires "https://github.com/logos-messaging/nim-ffi#v0.1.3"
 
 requires "https://github.com/logos-messaging/nim-sds.git#b12f5ee07c5b764303b51fb948b32a4ade1de3b5"
 
-requires "https://github.com/NagyZoltanPeter/nim-brokers.git#v3.1.4"
+requires "https://github.com/NagyZoltanPeter/nim-brokers.git#v3.3.0"
 
 # Exact lsquic pin: libp2p only floors it (>= 0.5.4); without this anchor a
 # re-solve (e.g. `nimble setup` after a manifest edit) floats to the newest
