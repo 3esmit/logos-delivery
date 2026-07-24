@@ -6,12 +6,17 @@
 when defined(macosx) or defined(nativeTraceDiag):
   import std/exitprocs
   import std/posix
+  # unbuffered stdio: the failing check's output must not die in a buffer
+  # when something quits mid-test
+  setStdIoUnbuffered()
   proc backtrace(buf: pointer, size: cint): cint {.importc, header: "<execinfo.h>".}
   proc backtraceSymbolsFd(
     buf: pointer, size: cint, fd: cint
   ) {.importc: "backtrace_symbols_fd", header: "<execinfo.h>".}
 
   proc dumpNativeTrace() {.noconv.} =
+    let msg = "=== exiting, programResult=" & $programResult & " ===\n"
+    discard posix.write(2, cstring(msg), msg.len)
     var buf: array[64, pointer]
     let n = backtrace(addr buf[0], 64)
     backtraceSymbolsFd(addr buf[0], n, 2)
