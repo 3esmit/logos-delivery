@@ -81,11 +81,7 @@ requires "https://github.com/NagyZoltanPeter/nim-brokers.git#v3.3.0"
 # lsquic release and silently rewrites the lock.
 requires "lsquic == 0.5.6"
 requires "https://github.com/vacp2p/nim-jwt.git#057ec95eb5af0eea9c49bfe9025b3312c95dc5f2"
-# nim-libp2p-mix pinned to the head of logos-co/nim-libp2p-mix#32, which sits
-# on mix master and relaxes mix's exact libp2p pin to 2.2.0. The commit is
-# fetchable from the upstream repo (GitHub serves PR heads via
-# refs/pull/32/head). Replace with the merged revision once PR #32 lands.
-requires "https://github.com/logos-co/nim-libp2p-mix#362e62d30555e0a8482b5ea95ab49f3f19c558a6"
+requires "https://github.com/logos-co/nim-libp2p-mix#395b65aadf0a4ad273e544647b7e06f1ca77cf67"
 
 proc getMyCPU(): string =
   ## Need to set cpu more explicit manner to avoid arch issues between dependencies
