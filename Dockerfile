@@ -70,6 +70,9 @@ CMD ["--help"]
 # /usr/bin/wakunode symlink. Build with --build-arg MAKE_TARGET=logosdeliverynode.
 FROM prod AS logosdeliverynode
 
+LABEL source="https://github.com/logos-messaging/logos-delivery"
+LABEL description="Logos Delivery node"
+
 RUN ln -sv /usr/local/bin/logosdeliverynode /usr/bin/logosdeliverynode
 
 ENTRYPOINT ["/usr/bin/logosdeliverynode"]

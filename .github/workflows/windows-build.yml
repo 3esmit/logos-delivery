@@ -123,7 +123,7 @@ jobs:
     - name: Building logosdeliverynode.exe
       run: |
         export PATH="$GITHUB_WORKSPACE/.nim_runtime/bin:$HOME/.nimble/bin:$PATH"
-        make logosdeliverynode V=3 -j${{ env.NPROC }}
+        make logosdeliverynode POSTGRES=1 V=3 -j${{ env.NPROC }}
 
     - name: Building liblogosdelivery.dll
       run: |
