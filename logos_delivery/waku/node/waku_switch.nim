@@ -2,7 +2,7 @@
 {.push raises: [].}
 
 import
-  std/options,
+  results,
   chronos,
   chronicles,
   eth/keys,
@@ -14,6 +14,7 @@ import
   libp2p/builders,
   libp2p/switch,
   libp2p/transports/[transport, tcptransport, wstransport]
+import ./delivery_dialer
 
 # override nim-libp2p default value (which is also 1)
 const MaxConnectionsPerPeer* = 1
@@ -56,10 +57,10 @@ proc withWssTransport*(
   )
 
 proc newWakuSwitch*(
-    privKey = none(crypto.PrivateKey),
+    privKey = Opt.none(crypto.PrivateKey),
     address = MultiAddress.init("/ip4/127.0.0.1/tcp/0").tryGet(),
-    wsAddress = none(MultiAddress),
-    quicAddress = none(MultiAddress),
+    wsAddress = Opt.none(MultiAddress),
+    quicAddress = Opt.none(MultiAddress),
     secureManagers: openarray[SecureProtocol] = [SecureProtocol.Noise],
     transportFlags: set[ServerFlags] = {},
     rng: crypto.Rng,
@@ -74,8 +75,8 @@ proc newWakuSwitch*(
     wssEnabled: bool = false,
     secureKeyPath: string = "",
     secureCertPath: string = "",
-    agentString = none(string), # defaults to nim-libp2p version
-    peerStoreCapacity = none(int), # defaults to 1.25 maxConnections
+    agentString = Opt.none(string), # defaults to nim-libp2p version
+    peerStoreCapacity = Opt.none(int), # defaults to 1.25 maxConnections
     rendezvous: RendezVous = nil,
     circuitRelay: Relay,
 ): Switch {.raises: [Defect, IOError, LPError].} =
@@ -132,4 +133,6 @@ proc newWakuSwitch*(
   if not rendezvous.isNil():
     b = b.withRendezVous()
 
-  b.build()
+  let switch = b.build()
+  DeliveryDialer.install(switch)
+  switch

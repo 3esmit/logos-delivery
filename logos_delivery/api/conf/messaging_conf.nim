@@ -1,59 +1,60 @@
-import std/options
 import std/net
-import results
-import libp2p/crypto/crypto
+import results, libp2p/crypto/crypto
 
 import logos_delivery/api/conf/kernel_conf
 import logos_delivery/waku/common/logging
 import logos_delivery/waku/factory/networks_config
+import logos_delivery/messaging/rate_limit_manager/rate_limit_manager
 
-export kernel_conf
+export kernel_conf, rate_limit_manager
 
-type LogosDeliveryMode* {.pure.} = enum
-  Edge # client-only node
-  Core # full service node
-  Fleet # kernel-only node from a raw kernel config
+# `LogosDeliveryMode` and `EntryLayer` are defined at the leaf (`cli_args`) so
+# they can appear on `WakuNodeConf`; re-exported here via `kernel_conf`.
 
 type MessagingClientConf* = object
-  clusterId* {.name: "cluster-id".}: Option[uint16] ## Network cluster id.
-  numShardsInCluster* {.name: "num-shards-in-network".}: Option[uint16]
+  clusterId* {.name: "cluster-id".}: Opt[uint16] ## Network cluster id.
+  numShardsInCluster* {.name: "num-shards-in-network".}: Opt[uint16]
     ## Number of shards in the cluster.
-  p2pTcpPort* {.name: "tcp-port".}: Option[Port] ## TCP listening port.
-  discv5UdpPort* {.name: "discv5-udp-port".}: Option[Port] ## discv5 UDP port.
-  websocketSupport* {.name: "websocket-support".}: Option[bool]
+  p2pTcpPort* {.name: "tcp-port".}: Opt[Port] ## TCP listening port.
+  discv5UdpPort* {.name: "discv5-udp-port".}: Opt[Port] ## discv5 UDP port.
+  websocketSupport* {.name: "websocket-support".}: Opt[bool]
     ## Enable the websocket transport.
-  websocketPort* {.name: "websocket-port".}: Option[Port] ## Websocket listening port.
-  quicSupport* {.name: "quic-support".}: Option[bool] ## Enable the QUIC transport.
-  quicPort* {.name: "quic-port".}: Option[Port] ## QUIC (UDP) listening port.
-  listenIpv4* {.name: "listen-address".}: Option[IpAddress] ## Inbound bind address.
-  maxMessageSize* {.name: "max-msg-size".}: Option[string]
+  websocketPort* {.name: "websocket-port".}: Opt[Port] ## Websocket listening port.
+  quicSupport* {.name: "quic-support".}: Opt[bool] ## Enable the QUIC transport.
+  quicPort* {.name: "quic-port".}: Opt[Port] ## QUIC (UDP) listening port.
+  listenIpv4* {.name: "listen-address".}: Opt[IpAddress] ## Inbound bind address.
+  maxMessageSize* {.name: "max-msg-size".}: Opt[string]
     ## Maximum accepted message size (e.g. "150 KiB").
-  entryNodes* {.name: "entry-node".}: Option[seq[string]]
+  entryNodes* {.name: "entry-node".}: Opt[seq[string]]
     ## Bootstrap / connectivity nodes (enrtree or multiaddr).
-  ethRpcEndpoints* {.name: "rln-relay-eth-client-address".}: Option[seq[EthRpcUrl]]
+  ethRpcEndpoints* {.name: "rln-relay-eth-client-address".}: Opt[seq[EthRpcUrl]]
     ## Ethereum RPC endpoints (required for RLN validation); multiple for fail-over.
-  rlnContractAddress* {.name: "rln-relay-eth-contract-address".}: Option[string]
+  rlnContractAddress* {.name: "rln-relay-eth-contract-address".}: Opt[string]
     ## RLN contract address; when set, RLN validation is enabled.
-  rlnChainId* {.name: "rln-relay-chain-id".}: Option[uint]
+  rlnChainId* {.name: "rln-relay-chain-id".}: Opt[uint]
     ## Chain id the RLN contract is deployed on.
-  rlnEpochSizeSec* {.name: "rln-relay-epoch-sec".}: Option[uint]
+  rlnEpochSizeSec* {.name: "rln-relay-epoch-sec".}: Opt[uint]
     ## RLN epoch size, in seconds.
-  reliabilityEnabled* {.name: "reliability".}: Option[bool]
+  reliabilityEnabled* {.name: "reliability".}: Opt[bool]
     ## Enable store-based send reliability.
-  store*: Option[bool] ## Enable the store protocol.
-  storenode* {.name: "storenode".}: Option[string]
-  storeMessageDbUrl* {.name: "store-message-db-url".}: Option[string]
+  store*: Opt[bool] ## Enable the store protocol.
+  storenode* {.name: "storenode".}: Opt[string]
+  storeMessageDbUrl* {.name: "store-message-db-url".}: Opt[string]
     ## Database connection URL for the store service's persistent storage.
-  storeMessageRetentionPolicy* {.name: "store-message-retention-policy".}:
-    Option[string] ## Store retention policy (e.g. "time:3600;size:1GB").
-  storeMaxNumDbConnections* {.name: "store-max-num-db-connections".}: Option[int]
+  storeMessageRetentionPolicy* {.name: "store-message-retention-policy".}: Opt[string]
+    ## Store retention policy (e.g. "time:3600;size:1GB").
+  storeMaxNumDbConnections* {.name: "store-max-num-db-connections".}: Opt[int]
     ## Maximum number of simultaneous store database connections.
-  logLevel* {.name: "log-level".}: Option[logging.LogLevel]
+  logLevel* {.name: "log-level".}: Opt[logging.LogLevel]
     ## Process log level (TRACE..FATAL); applied by the kernel on node creation.
-  logFormat* {.name: "log-format".}: Option[logging.LogFormat]
+  logFormat* {.name: "log-format".}: Opt[logging.LogFormat]
     ## Process log format (TEXT or JSON); applied by the kernel on node creation.
-  nodeKey* {.name: "nodekey".}: Option[crypto.PrivateKey]
+  nodeKey* {.name: "nodekey".}: Opt[crypto.PrivateKey]
     ## P2P node private key (64-char hex): stable identity / peerId across restarts.
+  rateLimit*: Opt[RateLimitConfig]
+    ## Per-epoch message rate limit enforced by the send service. `Opt` like
+    ## every other field so `merge` propagates a caller's override; unset falls
+    ## back to `DefaultRateLimitConfig` (rate limiting disabled).
 
 proc applyMode*(conf: var WakuNodeConf, mode: LogosDeliveryMode): ConfResult[void] =
   ## Sets the protocol flags implied by the mode.
@@ -62,7 +63,7 @@ proc applyMode*(conf: var WakuNodeConf, mode: LogosDeliveryMode): ConfResult[voi
     conf.relay = true
     conf.filter = true
     conf.lightpush = true
-    conf.discv5Discovery = some(true)
+    conf.discv5Discovery = Opt.some(true)
     conf.peerExchange = true
     conf.rendezvous = true
   of LogosDeliveryMode.Edge:
@@ -71,9 +72,6 @@ proc applyMode*(conf: var WakuNodeConf, mode: LogosDeliveryMode): ConfResult[voi
     conf.filter = false
     conf.lightpush = false
     conf.store = false
-  of LogosDeliveryMode.Fleet:
-    return
-      err("fleet mode takes a raw kernel config; use LogosDelivery.new(kernelConf)")
   return ok()
 
 proc toWakuNodeConf*(
@@ -82,6 +80,10 @@ proc toWakuNodeConf*(
   ## Mode sets the protocol flags; set fields map to their kernel counterpart.
   var conf = ?defaultWakuNodeConf()
   ?applyMode(conf, mode)
+  # Keep the `mode` field consistent with the applied flags so a later
+  # `LogosDelivery.new(WakuNodeConf)` re-application is idempotent instead of
+  # clobbering these flags with the field's default (`Core`).
+  conf.mode = mode
 
   if self.store.isSome():
     conf.store = self.store.get()
@@ -108,11 +110,11 @@ proc toWakuNodeConf*(
     conf.ethClientUrls = self.ethRpcEndpoints.get()
   if self.rlnContractAddress.isSome():
     conf.rlnRelayEthContractAddress = self.rlnContractAddress.get()
-    conf.rlnRelay = some(true)
+    conf.rlnRelay = Opt.some(true)
   if self.rlnChainId.isSome():
     conf.rlnRelayChainId = self.rlnChainId.get()
   if self.rlnEpochSizeSec.isSome():
-    conf.rlnEpochSizeSec = some(self.rlnEpochSizeSec.get().uint64)
+    conf.rlnEpochSizeSec = Opt.some(self.rlnEpochSizeSec.get().uint64)
   if self.logLevel.isSome():
     conf.logLevel = self.logLevel.get()
   if self.logFormat.isSome():
@@ -132,7 +134,7 @@ proc toWakuNodeConf*(
 proc merge*(base, overrides: MessagingClientConf): MessagingClientConf =
   var m = base
   for _, mField, oField in fieldPairs(m, overrides):
-    when oField is Option:
+    when oField is Opt:
       if oField.isSome():
         mField = oField
   return m
@@ -140,8 +142,8 @@ proc merge*(base, overrides: MessagingClientConf): MessagingClientConf =
 proc resolvePreset*(preset: string): ConfResult[MessagingClientConf] =
   ## Preset to messaging-only fields. Kernel-mirrored fields stay unset; the
   ## kernel resolves those from `conf.preset`.
-  let npcOpt = ?toNetworkPresetConf(preset, none(uint16))
+  let npcOpt = ?toNetworkPresetConf(preset, Opt.none(uint16))
   if npcOpt.isNone():
     return ok(MessagingClientConf())
   let npc = npcOpt.get()
-  return ok(MessagingClientConf(reliabilityEnabled: some(npc.p2pReliability)))
+  return ok(MessagingClientConf(reliabilityEnabled: Opt.some(npc.p2pReliability)))

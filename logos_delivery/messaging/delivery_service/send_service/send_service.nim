@@ -1,15 +1,15 @@
-import logos_delivery/waku/compat/option_valueor
 ## This module reinforces the publish operation with regular store-v3 requests.
 ##
 
-import std/[sequtils, tables, options, typetraits]
+import std/[sequtils, tables, typetraits]
 import chronos, chronicles, libp2p/utility
 import brokers/broker_context
 import
   ./[send_processor, relay_processor, lightpush_processor, delivery_task],
   logos_delivery/waku/[waku_core, waku_store/common],
   logos_delivery/waku/waku,
-  logos_delivery/waku/api/[store, subscriptions, publish]
+  logos_delivery/waku/api/[store, subscriptions, publish],
+  logos_delivery/messaging/rate_limit_manager/rate_limit_manager
 import logos_delivery/api/events/messaging_client_events
 
 logScope:
@@ -47,6 +47,9 @@ type SendService* = ref object of RootObj
 
   serviceLoopHandle: Future[void] ## handle that allows to stop the async task
   sendProcessor: BaseSendProcessor
+  rateLimitManager: RateLimitManager
+    ## Meters first transmissions against the per-epoch budget; re-publishes
+    ## of an already-propagated message resend the same bytes and are free.
 
   waku: Waku
   checkStoreForMessages: bool
@@ -78,7 +81,10 @@ proc setupSendProcessorChain(
   return ok(processors[0])
 
 proc new*(
-    T: typedesc[SendService], preferP2PReliability: bool, waku: Waku
+    T: typedesc[SendService],
+    preferP2PReliability: bool,
+    waku: Waku,
+    rateLimitManager: RateLimitManager,
 ): Result[T, string] =
   if not waku.hasRelay() and not waku.hasLightpush():
     return err(
@@ -95,6 +101,7 @@ proc new*(
     taskCache: newSeq[DeliveryTask](),
     serviceLoopHandle: nil,
     sendProcessor: sendProcessorChain,
+    rateLimitManager: rateLimitManager,
     waku: waku,
     checkStoreForMessages: checkStoreForMessages,
     lastStoreCheckTime: Moment.now(),
@@ -246,6 +253,12 @@ proc trySendMessages(self: SendService) {.async.} =
 
   for task in tasksToSend:
     # Todo, check if it has any perf gain to run them concurrent...
+    if task.firstPropagatedTime.isNone():
+      ## Never propagated: this transmission consumes a fresh epoch slot, so
+      ## it must be admitted. Tasks that stay over budget remain in
+      ## `NextRoundRetry` and are retried as the epoch rolls over.
+      (await self.rateLimitManager.admit(task.msg.payload)).isOkOr:
+        continue
     await self.sendProcessor.process(task)
 
 proc serviceLoop(self: SendService) {.async.} =
@@ -274,6 +287,13 @@ proc send*(self: SendService, task: DeliveryTask) {.async.} =
   self.waku.subscribe(task.msg.contentTopic).isOkOr:
     error "SendService.send: failed to subscribe to content topic",
       contentTopic = task.msg.contentTopic, error = error
+
+  (await self.rateLimitManager.admit(task.msg.payload)).isOkOr:
+    info "SendService.send: over rate-limit budget, parking task",
+      requestId = task.requestId, msgHash = task.msgHash.to0xHex()
+    task.state = DeliveryState.NextRoundRetry
+    self.addTask(task)
+    return
 
   await self.sendProcessor.process(task)
   reportTaskResult(self, task)
