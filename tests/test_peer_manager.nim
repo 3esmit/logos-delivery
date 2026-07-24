@@ -1,5 +1,34 @@
 {.used.}
 
+# TEMPORARY diagnostic for the macos quic process kill: dump a native
+# backtrace when anything calls exit() or a fatal signal fires, so the CI
+# log shows the caller.
+when defined(macosx) or defined(nativeTraceDiag):
+  import std/exitprocs
+  import std/posix
+  proc backtrace(buf: pointer, size: cint): cint {.importc, header: "<execinfo.h>".}
+  proc backtraceSymbolsFd(
+    buf: pointer, size: cint, fd: cint
+  ) {.importc: "backtrace_symbols_fd", header: "<execinfo.h>".}
+
+  proc dumpNativeTrace() {.noconv.} =
+    var buf: array[64, pointer]
+    let n = backtrace(addr buf[0], 64)
+    backtraceSymbolsFd(addr buf[0], n, 2)
+
+  proc onFatalSignal(sig: cint) {.noconv.} =
+    let msg = "=== fatal signal " & $sig & " ===\n"
+    discard posix.write(2, cstring(msg), msg.len)
+    dumpNativeTrace()
+    signal(sig, SIG_DFL)
+    discard posix.kill(posix.getpid(), sig)
+
+  addExitProc(dumpNativeTrace)
+  signal(SIGABRT, onFatalSignal)
+  signal(SIGSEGV, onFatalSignal)
+  signal(SIGBUS, onFatalSignal)
+  signal(SIGILL, onFatalSignal)
+
 import
   std/[sequtils, strutils, times, sugar, net],
   results,
@@ -64,7 +93,7 @@ procSuite "Peer Manager":
   # quic dial tests kill the test process on macos (nim-lsquic darwin issue,
   # reproduces on CI since the quic-first dialer landed); skip until fixed.
   # -d:quicDialTests re-enables them for debugging on a mac.
-  when not defined(macosx) or defined(quicDialTests):
+  when true: # TEMPORARY: quic dial tests forced on for the macos diagnostic round
     asyncTest "connectPeer() prefers quic even when tcp is listed first":
       ## Announced address lists are tcp-first and identify rewrites the
       ## address book with that order after every connection, so dial paths
