@@ -126,6 +126,55 @@ method close*(self: FallbackPortMapper) {.async: (raises: []), gcsafe.} =
     await candidate.close()
   self.candidates = @[]
 
+type RetryingPortMapper* = ref object of PortMapper
+  ## Wraps a port mapper with a delete-then-re-add fallback: when the gateway
+  ## rejects a mapping request - typically because a stale entry for the same
+  ## external port is holding the slot (left over by a previous run, or by
+  ## firmware that refuses to refresh an existing entry in place) - the stale
+  ## mapping is removed and the request retried once. This also keeps lease
+  ## renewal working on gateways that reject in-place refreshes.
+  inner: PortMapper
+
+func new*(T: typedesc[RetryingPortMapper], inner: PortMapper): T =
+  T(inner: inner)
+
+method discover*(
+    self: RetryingPortMapper, timeout: Duration
+): Future[Result[IpAddress, string]] {.async: (raises: [CancelledError]), gcsafe.} =
+  return await self.inner.discover(timeout)
+
+method map*(
+    self: RetryingPortMapper,
+    internalPort: Port,
+    externalPort: Port,
+    proto: MapProto,
+    lease: uint32,
+): Future[Result[Port, string]] {.async: (raises: [CancelledError]), gcsafe.} =
+  let first = await self.inner.map(internalPort, externalPort, proto, lease)
+  if first.isOk():
+    return first
+  debug "NAT mapping rejected; removing stale entry and retrying",
+    externalPort, proto, err = first.error
+  discard await self.inner.unmap(externalPort, proto)
+  let retried = await self.inner.map(internalPort, externalPort, proto, lease)
+  if retried.isOk():
+    return retried
+  ## The slot cannot be reclaimed (e.g. the entry belongs to another host):
+  ## fall back to an alternate external port. The gateway reports the port
+  ## actually granted and announced addresses follow it.
+  let alternate = Port(49152'u16 + uint16(externalPort) mod 16000'u16)
+  debug "NAT mapping still rejected; requesting an alternate external port",
+    requested = externalPort, alternate, proto
+  return await self.inner.map(internalPort, alternate, proto, lease)
+
+method unmap*(
+    self: RetryingPortMapper, externalPort: Port, proto: MapProto
+): Future[Result[void, string]] {.async: (raises: [CancelledError]), gcsafe.} =
+  return await self.inner.unmap(externalPort, proto)
+
+method close*(self: RetryingPortMapper) {.async: (raises: []), gcsafe.} =
+  await self.inner.close()
+
 const NatDiscoveryTimeout = 1.seconds
   ## Bounds the gateway discovery the NATService performs during switch
   ## start. Node start awaits discovery, and miniupnpc repeats its SSDP
@@ -150,13 +199,60 @@ func toNatConfig*(strategy: NatStrategy): Opt[NATConfig] =
     Opt.none(NATConfig)
 
 proc natPortMapperFactory*(strategy: NatStrategy): PortMapperFactory =
-  ## For `NatAny`, overrides libp2p's default port mapper with the UPnP-then-
-  ## NAT-PMP fallback; every other strategy uses the library default (nil).
-  if strategy.kind != NatAny:
+  ## The port mapper for a strategy: UPnP-then-NAT-PMP fallback for `NatAny`,
+  ## the matching single mapper for `NatUpnp`/`NatPmp`, nil (no NATService)
+  ## otherwise. Every mapper is wrapped in the delete-then-re-add retrier so
+  ## stale gateway entries cannot wedge mapping or lease renewal.
+  if strategy.kind notin {NatAny, NatUpnp, NatPmp}:
     return nil
+  let kind = strategy.kind
   return proc(mode: PortMappingMode): Opt[PortMapper] {.gcsafe, raises: [].} =
     try:
-      Opt.some(PortMapper(FallbackPortMapper.new(UpnpMapper.new(), NatPmpMapper.new())))
+      let inner =
+        case kind
+        of NatAny:
+          PortMapper(FallbackPortMapper.new(UpnpMapper.new(), NatPmpMapper.new()))
+        of NatUpnp:
+          PortMapper(UpnpMapper.new())
+        of NatPmp:
+          PortMapper(NatPmpMapper.new())
+        else:
+          return Opt.none(PortMapper)
+      Opt.some(PortMapper(RetryingPortMapper.new(inner)))
     except ResourceExhaustedError as e:
-      error "Failed to construct fallback NAT port mapper", err = e.msg
+      error "Failed to construct NAT port mapper", err = e.msg
       Opt.none(PortMapper)
+
+proc mapPermanentUdpPort*(
+    mapper: PortMapper, port: Port
+): Future[Result[tuple[externalIp: IpAddress, externalPort: Port], string]] {.
+    async: (raises: [CancelledError])
+.} =
+  ## Discover the gateway through `mapper` and map a single udp port with a
+  ## permanent lease (0), for sockets that live outside the switch and its
+  ## NATService (discv5). No renewal loop is run: firmware may cap the
+  ## permanent lease (24h observed), after which the mapping lapses until
+  ## the next start. A leftover entry from a crashed run is reclaimed by the
+  ## retrier's delete-and-re-add.
+  let externalIp = (await mapper.discover(NatDiscoveryTimeout)).valueOr:
+    return err("NAT discovery failed: " & error)
+  let externalPort = (await mapper.map(port, port, mpUdp, 0)).valueOr:
+    return err("NAT port mapping failed: " & error)
+  return ok((externalIp: externalIp, externalPort: externalPort))
+
+proc mapPermanentUdpPort*(
+    strategy: NatStrategy, port: Port
+): Future[Result[tuple[externalIp: IpAddress, externalPort: Port], string]] {.
+    async: (raises: [CancelledError])
+.} =
+  ## As above, constructing (and closing when done) the strategy's mapper.
+  let factory = natPortMapperFactory(strategy)
+  if factory.isNil():
+    return err("NAT strategy has no port mapper: " & $strategy)
+  # The factory captures the strategy; its mode argument is not consulted.
+  let mapper = factory(PortMappingMode.Upnp).valueOr:
+    return err("could not construct NAT port mapper")
+  try:
+    return await mapPermanentUdpPort(mapper, port)
+  finally:
+    await mapper.close()

@@ -51,20 +51,31 @@ suite "NAT config - NATConfig mapping":
       toNatConfig(NatStrategy(kind: NatExtIp, extIp: parseIpAddress("203.0.113.7")))
         .isNone()
 
-  test "only the any strategy overrides the port mapper factory":
+  test "every NAT strategy gets a port mapper factory, the rest none":
     check:
-      natPortMapperFactory(NatStrategy(kind: NatUpnp)).isNil()
-      natPortMapperFactory(NatStrategy(kind: NatPmp)).isNil()
-      natPortMapperFactory(NatStrategy(kind: NatNone)).isNil()
       not natPortMapperFactory(NatStrategy(kind: NatAny)).isNil()
+      not natPortMapperFactory(NatStrategy(kind: NatUpnp)).isNil()
+      not natPortMapperFactory(NatStrategy(kind: NatPmp)).isNil()
+      natPortMapperFactory(NatStrategy(kind: NatNone)).isNil()
+      natPortMapperFactory(
+        NatStrategy(kind: NatExtIp, extIp: parseIpAddress("203.0.113.7"))
+      )
+        .isNil()
 
 type StubMapper = ref object of PortMapper
   ## Scripted port mapper: discovery yields `ip` when set, an error otherwise.
+  ## `mapRejections` makes that many leading map() calls fail, mimicking a
+  ## gateway whose requested slot is occupied until the entry is removed.
   ip: Opt[IpAddress]
+  mapRejections: int
+  occupiedPort: Opt[Port]
+  unmapDenied: bool
   discoverCalls: int
   mapCalls: int
   unmapCalls: int
   closeCalls: int
+  lastMapProto: MapProto
+  lastMapLease: uint32
 
 method discover(
     self: StubMapper, timeout: Duration
@@ -82,12 +93,21 @@ method map(
     lease: uint32,
 ): Future[Result[Port, string]] {.async: (raises: [CancelledError]), gcsafe.} =
   inc self.mapCalls
+  self.lastMapProto = proto
+  self.lastMapLease = lease
+  if self.mapRejections > 0:
+    dec self.mapRejections
+    return err("stub mapping rejection")
+  if self.occupiedPort == Opt.some(externalPort):
+    return err("stub port occupied")
   return ok(externalPort)
 
 method unmap(
     self: StubMapper, externalPort: Port, proto: MapProto
 ): Future[Result[void, string]] {.async: (raises: [CancelledError]), gcsafe.} =
   inc self.unmapCalls
+  if self.unmapDenied:
+    return err("stub unmap denied")
   return ok()
 
 method close(self: StubMapper) {.async: (raises: []), gcsafe.} =
@@ -190,3 +210,86 @@ suite "NAT config - fallback port mapper":
     check:
       first.closeCalls == 1
       second.closeCalls == 1
+
+suite "NAT config - permanent udp port mapping":
+  asyncTest "maps the port permanently through the mapper":
+    let inner = stub("203.0.113.1")
+
+    let res = await mapPermanentUdpPort(PortMapper(inner), Port(9000))
+    check:
+      res.get().externalIp == parseIpAddress("203.0.113.1")
+      res.get().externalPort == Port(9000)
+      inner.discoverCalls == 1
+      inner.mapCalls == 1
+      inner.lastMapProto == mpUdp
+      inner.lastMapLease == 0 # permanent lease
+
+  asyncTest "reports discovery failure":
+    let res = await mapPermanentUdpPort(PortMapper(stub()), Port(9000))
+    check:
+      res.isErr()
+
+suite "NAT config - retrying port mapper":
+  asyncTest "a clean mapping needs no retry":
+    let
+      inner = stub("203.0.113.1")
+      mapper = RetryingPortMapper.new(inner)
+
+    check:
+      (await mapper.map(Port(7), Port(7), mpTcp, 60)).get() == Port(7)
+      inner.mapCalls == 1
+      inner.unmapCalls == 0
+
+  asyncTest "a rejected mapping is retried after removing the stale entry":
+    let inner = stub("203.0.113.1")
+    inner.mapRejections = 1
+    let mapper = RetryingPortMapper.new(inner)
+
+    check:
+      (await mapper.map(Port(7), Port(7), mpTcp, 60)).get() == Port(7)
+      inner.mapCalls == 2
+      inner.unmapCalls == 1 # the stale entry was removed between attempts
+
+  asyncTest "a mapping that keeps being rejected everywhere fails":
+    let inner = stub("203.0.113.1")
+    inner.mapRejections = 3
+    let mapper = RetryingPortMapper.new(inner)
+
+    check:
+      (await mapper.map(Port(7), Port(7), mpTcp, 60)).isErr()
+      inner.mapCalls == 3 # requested, delete-and-readd, alternate; no loop
+
+  asyncTest "a persistently occupied port falls back to an alternate external port":
+    let inner = stub("203.0.113.1")
+    inner.occupiedPort = Opt.some(Port(7))
+    let mapper = RetryingPortMapper.new(inner)
+
+    let res = await mapper.map(Port(7), Port(7), mpTcp, 60)
+    check:
+      res.isOk()
+      res.get() != Port(7) # mapped, on some other external port
+
+  asyncTest "a denied unmap still ends in a working mapping":
+    let inner = stub("203.0.113.1")
+    inner.occupiedPort = Opt.some(Port(7))
+    inner.unmapDenied = true
+    let mapper = RetryingPortMapper.new(inner)
+
+    let res = await mapper.map(Port(7), Port(7), mpTcp, 60)
+    check:
+      res.isOk()
+      res.get() != Port(7)
+
+  asyncTest "discover, unmap and close delegate to the wrapped mapper":
+    let
+      inner = stub("203.0.113.1")
+      mapper = RetryingPortMapper.new(inner)
+
+    check:
+      $(await mapper.discover(1.seconds)).get() == "203.0.113.1"
+      (await mapper.unmap(Port(7), mpTcp)).isOk()
+    await mapper.close()
+    check:
+      inner.discoverCalls == 1
+      inner.unmapCalls == 1
+      inner.closeCalls == 1

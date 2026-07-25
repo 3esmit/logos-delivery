@@ -503,6 +503,9 @@ proc foldNatMappedAddresses(node: WakuNode) =
     if address.isPublicMA() and address notin newAnnounced:
       newAnnounced.add(address)
 
+  if newAnnounced == node.announcedAddresses:
+    return
+
   info "Replacing announced addresses with NAT-mapped external addresses",
     previous = $node.announcedAddresses, updated = $newAnnounced
   node.announcedAddresses = newAnnounced
@@ -544,13 +547,6 @@ proc resolveAnnouncedAddresses(node: WakuNode) =
   info "Resolved dynamically allocated ports in announced addresses",
     previous = $node.announcedAddresses, updated = $newAnnounced
   node.announcedAddresses = newAnnounced
-
-proc isBindIpWithZeroPort(inputMultiAdd: MultiAddress): bool =
-  let inputStr = $inputMultiAdd
-  if inputStr.contains("0.0.0.0/tcp/0") or inputStr.contains("127.0.0.1/tcp/0"):
-    return true
-
-  return false
 
 proc updateAnnouncedAddrWithPrimaryIpAddr*(node: WakuNode): Result[void, string] =
   # Skip automatic IP replacement if extMultiAddrsOnly is set
@@ -681,10 +677,9 @@ proc start*(node: WakuNode) {.async.} =
   waku_version.set(1, labelValues = [git_version])
   info "Starting Waku node", version = git_version
 
-  var zeroPortPresent = false
-  for address in node.announcedAddresses:
-    if isBindIpWithZeroPort(address):
-      zeroPortPresent = true
+  ## Computed before start: whether the config left any port to the sockets
+  ## (see hasZeroPort); such configs postpone the primary-IP announce rewrite.
+  let zeroPortPresent = node.announcedAddresses.anyIt(it.hasZeroPort())
 
   if not node.wakuStoreResume.isNil():
     await node.wakuStoreResume.start()
@@ -702,24 +697,22 @@ proc start*(node: WakuNode) {.async.} =
   ## in the announced addresses with the resolved ones.
   node.resolveAnnouncedAddresses()
 
-  ## Capture the switch-produced addresses (in particular the NATService
-  ## mapped external addresses) and fold them into the announced addresses.
-  node.natMappedAddresses = node.switch.peerInfo.addrs
-  node.foldNatMappedAddresses()
-
-  ## The switch uses this mapper to update peer info addrs with announced
-  ## addrs on subsequent peerInfo updates. It is added after switch.start so
-  ## the NATService output could be captured above; from here on waku's
-  ## announced addresses are authoritative for peerInfo.addrs, while the
-  ## NATService mapper (which runs earlier in the mapper chain, on the raw
-  ## listen addresses) keeps renewing the port-mapping leases on each update.
+  ## The final stage of the address-mapper chain: capture the chain's output
+  ## (the resolved listen addresses, plus any NATService-mapped external
+  ## addresses), fold it into the announced addresses, and make those
+  ## authoritative for peerInfo.addrs. Running inside the chain keeps the
+  ## announced addresses current on every peerInfo update, including the
+  ## NATService's periodic mapping-renewal updates. It is added after
+  ## switch.start so its input reflects a started switch.
   let addressMapper = proc(
       listenAddrs: seq[MultiAddress]
   ): Future[seq[MultiAddress]] {.gcsafe, async: (raises: [CancelledError]).} =
+    node.natMappedAddresses = listenAddrs
+    node.foldNatMappedAddresses()
     return node.announcedAddresses
   node.switch.peerInfo.addressMappers.add(addressMapper)
 
-  ## Re-run the mapper chain so peerInfo.addrs immediately reflects the
+  ## Run the mapper chain so peerInfo.addrs immediately reflects the
   ## announced addresses: the switch already ran it once during start, before
   ## this mapper existed.
   await node.switch.peerInfo.update()

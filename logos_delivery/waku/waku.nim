@@ -35,6 +35,7 @@ import
     node/peer_manager,
     node/health_monitor,
     net/net_config,
+    common/nat_config,
     node/waku_metrics,
     node/subscription_manager,
     rest_api/message_cache,
@@ -270,10 +271,17 @@ proc getRunningNetConfig(waku: Waku): Future[Result[NetConfig, string]] {.async.
 
   # External IP and mapped ports discovered by the switch's NATService
   # (UPnP / NAT-PMP), so the recomputed NetConfig and the ENR carry the
-  # mapped external endpoint.
-  let natExtIp = waku.node.natExternalIp()
-  let natMappedPorts = getPorts(waku.node.natMappedExternalAddresses()).valueOr:
+  # mapped external endpoint. The external IP is only used when at least one
+  # port mapping is actually in place: a discovered IP without a mapping is
+  # not a reachable endpoint and must not be announced.
+  let natMappedAddresses = waku.node.natMappedExternalAddresses()
+  let natMappedPorts = getPorts(natMappedAddresses).valueOr:
     return err("Could not retrieve NAT-mapped ports: " & error)
+  let natExtIp =
+    if natMappedAddresses.len > 0:
+      waku.node.natExternalIp()
+    else:
+      Opt.none(IpAddress)
 
   # Rebuild NetConfig from the bound ports already read back into `conf`.
   let netConf = (
@@ -435,6 +443,21 @@ proc start*(waku: Waku): Future[Result[void, string]] {.async: (raises: []).} =
 
     waku.node.ports.discv5Udp = waku.wakuDiscV5.udpPort.uint16
     waku.conf.discv5Conf.get().udpPort = waku.wakuDiscV5.udpPort
+
+    ## The discv5 socket lives outside the switch, so the switch's NATService
+    ## does not map it: request its mapping here, so the ENR built below
+    ## carries the external port actually granted.
+    if conf.endpointConf.natStrategy.kind in {NatAny, NatUpnp, NatPmp}:
+      try:
+        let mapped = await mapPermanentUdpPort(
+          conf.endpointConf.natStrategy, waku.wakuDiscV5.udpPort
+        )
+        if mapped.isOk():
+          waku.conf.discv5Conf.get().udpPort = mapped.get().externalPort
+        else:
+          debug "discv5 NAT port mapping not available", err = mapped.error
+      except CancelledError:
+        debug "discv5 NAT port mapping cancelled"
 
   ## Update waku data that is set dynamically on node start
   try:
