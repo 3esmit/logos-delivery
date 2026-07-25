@@ -1,39 +1,5 @@
 {.used.}
 
-# TEMPORARY diagnostic for the macos quic process kill: dump a native
-# backtrace when anything calls exit() or a fatal signal fires, so the CI
-# log shows the caller.
-when defined(macosx) or defined(nativeTraceDiag):
-  import std/exitprocs
-  import std/posix
-  # unbuffered stdio: the failing check's output must not die in a buffer
-  # when something quits mid-test
-  setStdIoUnbuffered()
-  proc backtrace(buf: pointer, size: cint): cint {.importc, header: "<execinfo.h>".}
-  proc backtraceSymbolsFd(
-    buf: pointer, size: cint, fd: cint
-  ) {.importc: "backtrace_symbols_fd", header: "<execinfo.h>".}
-
-  proc dumpNativeTrace() {.noconv.} =
-    let msg = "=== exiting, programResult=" & $programResult & " ===\n"
-    discard posix.write(2, cstring(msg), msg.len)
-    var buf: array[64, pointer]
-    let n = backtrace(addr buf[0], 64)
-    backtraceSymbolsFd(addr buf[0], n, 2)
-
-  proc onFatalSignal(sig: cint) {.noconv.} =
-    let msg = "=== fatal signal " & $sig & " ===\n"
-    discard posix.write(2, cstring(msg), msg.len)
-    dumpNativeTrace()
-    signal(sig, SIG_DFL)
-    discard posix.kill(posix.getpid(), sig)
-
-  addExitProc(dumpNativeTrace)
-  signal(SIGABRT, onFatalSignal)
-  signal(SIGSEGV, onFatalSignal)
-  signal(SIGBUS, onFatalSignal)
-  signal(SIGILL, onFatalSignal)
-
 import
   std/[sequtils, strutils, times, sugar, net],
   results,
@@ -95,123 +61,117 @@ procSuite "Peer Manager":
       nodes[0].peerManager.switch.peerStore.connectedness(nodes[1].peerInfo.peerId) ==
         Connectedness.Connected
 
-  # quic dial tests kill the test process on macos (nim-lsquic darwin issue,
-  # reproduces on CI since the quic-first dialer landed); skip until fixed.
-  # -d:quicDialTests re-enables them for debugging on a mac.
-  when true: # TEMPORARY: quic dial tests forced on for the macos diagnostic round
-    asyncTest "connectPeer() prefers quic even when tcp is listed first":
-      ## Announced address lists are tcp-first and identify rewrites the
-      ## address book with that order after every connection, so dial paths
-      ## must reorder quic ahead of tcp themselves.
-      let nodes = toSeq(0 ..< 2).mapIt(newTestWakuNode(generateSecp256k1Key()))
-      await allFutures(nodes.mapIt(it.start()))
+  asyncTest "connectPeer() prefers quic even when tcp is listed first":
+    ## Announced address lists are tcp-first and identify rewrites the
+    ## address book with that order after every connection, so dial paths
+    ## must reorder quic ahead of tcp themselves.
+    let nodes = toSeq(0 ..< 2).mapIt(newTestWakuNode(generateSecp256k1Key()))
+    await allFutures(nodes.mapIt(it.start()))
 
-      let announced = nodes[1].peerInfo.toRemotePeerInfo().addrs
-      let tcpFirst =
-        announced.filterIt("/quic-v1" notin $it) & announced.filterIt("/quic-v1" in $it)
-      require tcpFirst.anyIt("/quic-v1" in $it)
-      require "/quic-v1" notin $tcpFirst[0]
+    let announced = nodes[1].peerInfo.toRemotePeerInfo().addrs
+    let tcpFirst =
+      announced.filterIt("/quic-v1" notin $it) & announced.filterIt("/quic-v1" in $it)
+    require tcpFirst.anyIt("/quic-v1" in $it)
+    require "/quic-v1" notin $tcpFirst[0]
 
-      let peer = RemotePeerInfo.init(nodes[1].peerInfo.peerId, tcpFirst)
-      require await nodes[0].peerManager.connectPeer(peer)
-      await sleepAsync(chronos.milliseconds(200))
+    let peer = RemotePeerInfo.init(nodes[1].peerInfo.peerId, tcpFirst)
+    require await nodes[0].peerManager.connectPeer(peer)
+    await sleepAsync(chronos.milliseconds(200))
 
-      let conns = nodes[0].peerManager.switch.connManager.getConnections().getOrDefault(
-          nodes[1].peerInfo.peerId
-        )
-      require conns.len >= 1
-      let obsAddr = conns[0].connection.observedAddr
-      check:
-        obsAddr.isSome()
-        "/quic-v1" in $obsAddr.get()
-
-      await allFutures(nodes.mapIt(it.stop()))
-
-    asyncTest "reconnect after identify address book refresh still dials quic":
-      ## The original quic-to-tcp drift: identify rewrites the address book
-      ## with the peer's announced tcp-first order after every connection, so
-      ## reconnects from the book must still come out quic.
-      let nodes = toSeq(0 ..< 2).mapIt(newTestWakuNode(generateSecp256k1Key()))
-      await allFutures(nodes.mapIt(it.start()))
-      let peerId = nodes[1].peerInfo.peerId
-
-      require await nodes[0].peerManager.connectPeer(
-        nodes[1].peerInfo.toRemotePeerInfo()
+    let conns = nodes[0].peerManager.switch.connManager.getConnections().getOrDefault(
+        nodes[1].peerInfo.peerId
       )
-      await sleepAsync(chronos.milliseconds(500))
+    require conns.len >= 1
+    let obsAddr = conns[0].connection.observedAddr
+    check:
+      obsAddr.isSome()
+      "/quic-v1" in $obsAddr.get()
 
-      # identify must have populated the book with a dual-stack address set
-      let bookAddrs = nodes[0].peerManager.switch.peerStore[AddressBook][peerId]
-      require bookAddrs.anyIt("/quic-v1" in $it)
-      require bookAddrs.anyIt("/quic-v1" notin $it)
+    await allFutures(nodes.mapIt(it.stop()))
 
-      # pin the book to tcp-first, as identify writes it today
-      let tcpFirst =
-        bookAddrs.filterIt("/quic-v1" notin $it) & bookAddrs.filterIt("/quic-v1" in $it)
-      nodes[0].peerManager.switch.peerStore[AddressBook][peerId] = tcpFirst
+  asyncTest "reconnect after identify address book refresh still dials quic":
+    ## The original quic-to-tcp drift: identify rewrites the address book
+    ## with the peer's announced tcp-first order after every connection, so
+    ## reconnects from the book must still come out quic.
+    let nodes = toSeq(0 ..< 2).mapIt(newTestWakuNode(generateSecp256k1Key()))
+    await allFutures(nodes.mapIt(it.start()))
+    let peerId = nodes[1].peerInfo.peerId
 
-      await nodes[0].peerManager.disconnectNode(peerId)
-      await sleepAsync(chronos.milliseconds(500))
+    require await nodes[0].peerManager.connectPeer(nodes[1].peerInfo.toRemotePeerInfo())
+    await sleepAsync(chronos.milliseconds(500))
 
-      require await nodes[0].peerManager.connectPeer(
-        RemotePeerInfo.init(peerId, tcpFirst)
+    # identify must have populated the book with a dual-stack address set
+    let bookAddrs = nodes[0].peerManager.switch.peerStore[AddressBook][peerId]
+    require bookAddrs.anyIt("/quic-v1" in $it)
+    require bookAddrs.anyIt("/quic-v1" notin $it)
+
+    # pin the book to tcp-first, as identify writes it today
+    let tcpFirst =
+      bookAddrs.filterIt("/quic-v1" notin $it) & bookAddrs.filterIt("/quic-v1" in $it)
+    nodes[0].peerManager.switch.peerStore[AddressBook][peerId] = tcpFirst
+
+    await nodes[0].peerManager.disconnectNode(peerId)
+    await sleepAsync(chronos.milliseconds(500))
+
+    require await nodes[0].peerManager.connectPeer(
+      RemotePeerInfo.init(peerId, tcpFirst)
+    )
+    let conns =
+      nodes[0].peerManager.switch.connManager.getConnections().getOrDefault(peerId)
+    require conns.len >= 1
+    let obsAddr = conns[0].connection.observedAddr
+    check:
+      obsAddr.isSome()
+      "/quic-v1" in $obsAddr.get()
+
+    await allFutures(nodes.mapIt(it.stop()))
+
+  asyncTest "protocol stream dial from tcp-first address book uses quic":
+    ## dialPeer(peerId, proto) resolves addresses from the address book and
+    ## must also come out quic when the book is tcp-first.
+    let nodes = toSeq(0 ..< 2).mapIt(newTestWakuNode(generateSecp256k1Key()))
+    await allFutures(nodes.mapIt(it.start()))
+    let peerId = nodes[1].peerInfo.peerId
+
+    let announced = nodes[1].peerInfo.toRemotePeerInfo().addrs
+    let tcpFirst =
+      announced.filterIt("/quic-v1" notin $it) & announced.filterIt("/quic-v1" in $it)
+    require "/quic-v1" notin $tcpFirst[0]
+    nodes[0].peerManager.addPeer(RemotePeerInfo.init(peerId, tcpFirst))
+
+    let connOpt = await nodes[0].peerManager.dialPeer(peerId, "/ipfs/id/1.0.0")
+    require connOpt.isSome()
+    let obsAddr = connOpt.get().observedAddr
+    check:
+      obsAddr.isSome()
+      "/quic-v1" in $obsAddr.get()
+
+    await allFutures(nodes.mapIt(it.stop()))
+
+  asyncTest "tcp-only dialer connects to a quic-first address list":
+    ## A node without quic support must skip quic addresses at no cost and
+    ## connect over tcp.
+    let dialer = newTestWakuNode(generateSecp256k1Key(), quicEnabled = false)
+    let server = newTestWakuNode(generateSecp256k1Key())
+    await allFutures(dialer.start(), server.start())
+
+    let announced = server.peerInfo.toRemotePeerInfo().addrs
+    let quicFirst =
+      announced.filterIt("/quic-v1" in $it) & announced.filterIt("/quic-v1" notin $it)
+    require "/quic-v1" in $quicFirst[0]
+
+    let peer = RemotePeerInfo.init(server.peerInfo.peerId, quicFirst)
+    require await dialer.peerManager.connectPeer(peer)
+    let conns = dialer.peerManager.switch.connManager.getConnections().getOrDefault(
+        server.peerInfo.peerId
       )
-      let conns =
-        nodes[0].peerManager.switch.connManager.getConnections().getOrDefault(peerId)
-      require conns.len >= 1
-      let obsAddr = conns[0].connection.observedAddr
-      check:
-        obsAddr.isSome()
-        "/quic-v1" in $obsAddr.get()
+    require conns.len >= 1
+    let obsAddr = conns[0].connection.observedAddr
+    check:
+      obsAddr.isSome()
+      "/quic-v1" notin $obsAddr.get()
 
-      await allFutures(nodes.mapIt(it.stop()))
-
-    asyncTest "protocol stream dial from tcp-first address book uses quic":
-      ## dialPeer(peerId, proto) resolves addresses from the address book and
-      ## must also come out quic when the book is tcp-first.
-      let nodes = toSeq(0 ..< 2).mapIt(newTestWakuNode(generateSecp256k1Key()))
-      await allFutures(nodes.mapIt(it.start()))
-      let peerId = nodes[1].peerInfo.peerId
-
-      let announced = nodes[1].peerInfo.toRemotePeerInfo().addrs
-      let tcpFirst =
-        announced.filterIt("/quic-v1" notin $it) & announced.filterIt("/quic-v1" in $it)
-      require "/quic-v1" notin $tcpFirst[0]
-      nodes[0].peerManager.addPeer(RemotePeerInfo.init(peerId, tcpFirst))
-
-      let connOpt = await nodes[0].peerManager.dialPeer(peerId, "/ipfs/id/1.0.0")
-      require connOpt.isSome()
-      let obsAddr = connOpt.get().observedAddr
-      check:
-        obsAddr.isSome()
-        "/quic-v1" in $obsAddr.get()
-
-      await allFutures(nodes.mapIt(it.stop()))
-
-    asyncTest "tcp-only dialer connects to a quic-first address list":
-      ## A node without quic support must skip quic addresses at no cost and
-      ## connect over tcp.
-      let dialer = newTestWakuNode(generateSecp256k1Key(), quicEnabled = false)
-      let server = newTestWakuNode(generateSecp256k1Key())
-      await allFutures(dialer.start(), server.start())
-
-      let announced = server.peerInfo.toRemotePeerInfo().addrs
-      let quicFirst =
-        announced.filterIt("/quic-v1" in $it) & announced.filterIt("/quic-v1" notin $it)
-      require "/quic-v1" in $quicFirst[0]
-
-      let peer = RemotePeerInfo.init(server.peerInfo.peerId, quicFirst)
-      require await dialer.peerManager.connectPeer(peer)
-      let conns = dialer.peerManager.switch.connManager.getConnections().getOrDefault(
-          server.peerInfo.peerId
-        )
-      require conns.len >= 1
-      let obsAddr = conns[0].connection.observedAddr
-      check:
-        obsAddr.isSome()
-        "/quic-v1" notin $obsAddr.get()
-
-      await allFutures(dialer.stop(), server.stop())
+    await allFutures(dialer.stop(), server.stop())
 
   asyncTest "Peer manager tracks active store request state":
     let nodes = toSeq(0 ..< 2).mapIt(newTestWakuNode(generateSecp256k1Key()))

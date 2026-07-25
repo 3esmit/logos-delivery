@@ -24,7 +24,6 @@ proc nodeConf(entryLayer: EntryLayer, rest = false): WakuNodeConf =
     raiseAssert error
   conf.entryLayer = entryLayer
   conf.mode = LogosDeliveryMode.Core
-  conf.nat = "none"
   conf.listenAddress = parseIpAddress("0.0.0.0")
   conf.tcpPort = Port(0)
   conf.discv5UdpPort = Port(0)
