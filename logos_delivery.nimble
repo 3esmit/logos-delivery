@@ -76,8 +76,10 @@ requires "https://github.com/logos-messaging/nim-sds.git#b12f5ee07c5b764303b51fb
 
 requires "https://github.com/NagyZoltanPeter/nim-brokers.git#v3.3.0"
 
-# lsquic pinned to the connection-close fix (vacp2p/nim-lsquic#101)
-requires "https://github.com/vacp2p/nim-lsquic#0403dd335086d0933e83989b532cd8852e0e49d2"
+# Exact lsquic pin: libp2p only floors it (>= 0.5.4); without this anchor a
+# re-solve (e.g. `nimble setup` after a manifest edit) floats to the newest
+# lsquic release and silently rewrites the lock.
+requires "lsquic == 0.5.6"
 requires "https://github.com/vacp2p/nim-jwt.git#057ec95eb5af0eea9c49bfe9025b3312c95dc5f2"
 requires "https://github.com/logos-co/nim-libp2p-mix#395b65aadf0a4ad273e544647b7e06f1ca77cf67"
 
