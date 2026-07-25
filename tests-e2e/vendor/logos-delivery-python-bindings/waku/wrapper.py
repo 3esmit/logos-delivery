@@ -107,7 +107,7 @@ def _new_cb_state():
 def _wait_cb_raw(
     state,
     op_name: str,
-    timeout_s: float = 20.0,
+    timeout_s: float = 45.0,
 ) -> Result[tuple[int, bytes], str]:
     ok = state["done"].wait(timeout_s)
     if not ok:
@@ -119,7 +119,7 @@ def _wait_cb_raw(
     return Ok((state["ret"], state["msg"]))
 
 
-def _wait_cb_ok(state, op_name: str, timeout_s: float = 20.0) -> Result[int, str]:
+def _wait_cb_ok(state, op_name: str, timeout_s: float = 45.0) -> Result[int, str]:
     wait_result = _wait_cb_raw(state, op_name, timeout_s)
     if wait_result.is_err():
         return Err(wait_result.err())
@@ -167,7 +167,7 @@ class NodeWrapper:
         config: dict,
         event_cb=None,
         *,
-        timeout_s: float = 20.0,
+        timeout_s: float = 45.0,
     ) -> Result["NodeWrapper", str]:
         config_json = json.dumps(config, separators=(",", ":"), ensure_ascii=False)
         config_buffer = ffi.new("char[]", config_json.encode("utf-8"))
@@ -205,7 +205,7 @@ class NodeWrapper:
         config: dict,
         event_cb=None,
         *,
-        timeout_s: float = 20.0,
+        timeout_s: float = 45.0,
     ) -> Result["NodeWrapper", str]:
         node_result = cls.create_node(
             config=config,
@@ -223,7 +223,7 @@ class NodeWrapper:
 
         return Ok(node)
 
-    def start_node(self, *, timeout_s: float = 20.0) -> Result[int, str]:
+    def start_node(self, *, timeout_s: float = 45.0) -> Result[int, str]:
         state = _new_cb_state()
         cb = self._make_waiting_cb(state)
 
@@ -233,7 +233,7 @@ class NodeWrapper:
 
         return _wait_cb_ok(state, "start_node", timeout_s)
 
-    def stop_node(self, *, timeout_s: float = 20.0) -> Result[int, str]:
+    def stop_node(self, *, timeout_s: float = 45.0) -> Result[int, str]:
         state = _new_cb_state()
         cb = self._make_waiting_cb(state)
 
@@ -243,7 +243,7 @@ class NodeWrapper:
 
         return _wait_cb_ok(state, "stop_node", timeout_s)
 
-    def destroy(self, *, timeout_s: float = 20.0) -> Result[int, str]:
+    def destroy(self, *, timeout_s: float = 45.0) -> Result[int, str]:
         state = _new_cb_state()
         cb = self._make_waiting_cb(state)
 
@@ -258,14 +258,14 @@ class NodeWrapper:
         self.ctx = ffi.NULL
         return wait_result
 
-    def stop_and_destroy(self, *, timeout_s: float = 20.0) -> Result[int, str]:
+    def stop_and_destroy(self, *, timeout_s: float = 45.0) -> Result[int, str]:
         stop_result = self.stop_node(timeout_s=timeout_s)
         if stop_result.is_err():
             return Err(stop_result.err())
 
         return self.destroy(timeout_s=timeout_s)
 
-    def subscribe_content_topic(self, content_topic: str, *, timeout_s: float = 20.0) -> Result[int, str]:
+    def subscribe_content_topic(self, content_topic: str, *, timeout_s: float = 45.0) -> Result[int, str]:
         state = _new_cb_state()
         cb = self._make_waiting_cb(state)
 
@@ -280,7 +280,7 @@ class NodeWrapper:
 
         return _wait_cb_ok(state, f"subscribe({content_topic})", timeout_s)
 
-    def unsubscribe_content_topic(self, content_topic: str, *, timeout_s: float = 20.0) -> Result[int, str]:
+    def unsubscribe_content_topic(self, content_topic: str, *, timeout_s: float = 45.0) -> Result[int, str]:
         state = _new_cb_state()
         cb = self._make_waiting_cb(state)
 
@@ -295,7 +295,7 @@ class NodeWrapper:
 
         return _wait_cb_ok(state, f"unsubscribe({content_topic})", timeout_s)
 
-    def send_message(self, message: dict, *, timeout_s: float = 20.0) -> Result[str, str]:
+    def send_message(self, message: dict, *, timeout_s: float = 45.0) -> Result[str, str]:
         state = _new_cb_state()
         cb = self._make_waiting_cb(state)
 
@@ -321,7 +321,7 @@ class NodeWrapper:
         request_id = cb_msg.decode("utf-8") if cb_msg else ""
         return Ok(request_id)
 
-    def get_available_node_info_ids(self, *, timeout_s: float = 20.0) -> Result[list[str], str]:
+    def get_available_node_info_ids(self, *, timeout_s: float = 45.0) -> Result[list[str], str]:
         state = _new_cb_state()
         cb = self._make_waiting_cb(state)
 
@@ -344,7 +344,7 @@ class NodeWrapper:
         except Exception as e:
             return Err(f"get_available_node_info_ids: invalid response: {e}")
 
-    def get_node_info(self, node_info_id: str, *, timeout_s: float = 20.0) -> Result[dict, str]:
+    def get_node_info(self, node_info_id: str, *, timeout_s: float = 45.0) -> Result[dict, str]:
         state = _new_cb_state()
         cb = self._make_waiting_cb(state)
 
@@ -375,7 +375,7 @@ class NodeWrapper:
 
         return Ok(result)
 
-    def get_available_configs(self, *, timeout_s: float = 20.0) -> Result[dict, str]:
+    def get_available_configs(self, *, timeout_s: float = 45.0) -> Result[dict, str]:
         state = _new_cb_state()
         cb = self._make_waiting_cb(state)
 
