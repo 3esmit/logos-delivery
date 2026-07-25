@@ -88,6 +88,13 @@ lib = ffi.dlopen(str(_repo_root / "lib" / "liblogosdelivery.so"))
 
 CallbackType = ffi.callback("void(int, const char*, size_t, void*)")
 
+# CFFI frees a callback's executable trampoline when its last python
+# reference drops. A native request that outlives its python-side wait (e.g.
+# a timeout) would then complete into freed code and crash the process, so
+# every trampoline handed to the library is kept for the process lifetime.
+# Requests are few and trampolines are small; the leak is bytes.
+_KEEPALIVE_CALLBACKS = []
+
 
 def _new_cb_state():
     return {
@@ -140,7 +147,9 @@ class NodeWrapper:
                 state["msg"] = msg
                 state["done"].set()
 
-        return CallbackType(c_cb)
+        cb = CallbackType(c_cb)
+        _KEEPALIVE_CALLBACKS.append(cb)
+        return cb
 
     @staticmethod
     def _make_event_cb(py_callback):
@@ -148,7 +157,9 @@ class NodeWrapper:
             msg = ffi.buffer(char_p, length)[:] if char_p != ffi.NULL else b""
             py_callback(int(ret), msg)
 
-        return CallbackType(c_cb)
+        cb = CallbackType(c_cb)
+        _KEEPALIVE_CALLBACKS.append(cb)
+        return cb
 
     @classmethod
     def create_node(
