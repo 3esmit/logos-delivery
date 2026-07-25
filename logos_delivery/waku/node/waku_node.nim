@@ -469,22 +469,22 @@ proc natExternalIp*(node: WakuNode): Opt[IpAddress] =
   ## one is configured and discovery succeeded.
   let natSvc = natService(node.switch).valueOr:
     return Opt.none(IpAddress)
-  natSvc.externalIp
+  return natSvc.externalIp
 
-proc ipOf(ma: MultiAddress): Opt[IpAddress] =
+func ipOf(ma: MultiAddress): Opt[IpAddress] =
   let ta = initTAddress(ma).valueOr:
     return Opt.none(IpAddress)
   try:
-    Opt.some(ta.address())
+    return Opt.some(ta.address())
   except ValueError:
-    Opt.none(IpAddress)
+    return Opt.none(IpAddress)
 
 proc natMappedExternalAddresses*(node: WakuNode): seq[MultiAddress] =
   ## The subset of the captured NATService output that carries the discovered
   ## external IP, i.e. the addresses reachable through the port mappings.
   let externalIp = node.natExternalIp().valueOr:
     return @[]
-  node.natMappedAddresses.filterIt(ipOf(it) == Opt.some(externalIp))
+  return node.natMappedAddresses.filterIt(it.ipOf() == Opt.some(externalIp))
 
 proc foldNatMappedAddresses(node: WakuNode) =
   ## Replace bind-derived (loopback/private/unspecified) announced addresses
@@ -507,13 +507,13 @@ proc foldNatMappedAddresses(node: WakuNode) =
     previous = $node.announcedAddresses, updated = $newAnnounced
   node.announcedAddresses = newAnnounced
 
-proc hasZeroPort(ma: MultiAddress): bool =
+func hasZeroPort(ma: MultiAddress): bool =
   ## True when the address's transport port is 0. The config uses port 0 to
   ## ask the kernel for a port at bind time, so such an address is a
   ## placeholder: it names a transport, but not a dialable endpoint.
   let transportAddress = initTAddress(ma).valueOr:
     return false
-  transportAddress.port == Port(0)
+  return transportAddress.port == Port(0)
 
 proc resolveAnnouncedAddresses(node: WakuNode) =
   ## The announced addresses only ever carry switch transports (tcp,

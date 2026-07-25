@@ -88,8 +88,8 @@ proc networkConfiguration*(
     wakuFlags: CapabilitiesBitfield,
     dnsAddrsNameServers: seq[IpAddress],
     natExtIp = Opt.none(IpAddress),
-    natExtTcpPort = Opt.none(Port),
-    natExtUdpPort = Opt.none(Port),
+    extTcpPort = Opt.none(Port),
+    extUdpPort = Opt.none(Port),
 ): Future[NetConfigResult] {.async.} =
   let tcpBindPort = conf.p2pTcpPort
 
@@ -103,9 +103,9 @@ proc networkConfiguration*(
   ## External IP/ports as far as they can be known at this point: `extip:` is
   ## static configuration, while UPnP/NAT-PMP mappings are performed by the
   ## switch's NATService at startup; the caller passes their results in
-  ## (`natExtIp`/`natExt*Port`) when recomputing the config on a running node.
+  ## (`natExtIp`/`extTcpPort`/`extUdpPort`) when recomputing the config on a
+  ## running node.
   var extIp = natExtIp
-  let (extTcpPort, extUdpPort) = (natExtTcpPort, natExtUdpPort)
   if extIp.isNone() and conf.natStrategy.kind == NatExtIp:
     extIp = Opt.some(conf.natStrategy.extIp)
 

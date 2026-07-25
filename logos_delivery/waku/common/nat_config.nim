@@ -7,9 +7,9 @@
 ## port mapping, external-IP discovery, lease refresh and announced-address
 ## rewriting on a per-switch basis.
 
-import std/[net, strutils]
-import chronos, chronicles, results
 import
+  std/[net, strutils],
+  chronos, chronicles, results,
   libp2p/services/natservice,
   libp2p/services/nat/[portmapper, upnp_mapper, natpmp_mapper]
 
@@ -33,7 +33,7 @@ type
     else:
       discard
 
-proc `$`*(strategy: NatStrategy): string =
+func `$`*(strategy: NatStrategy): string =
   case strategy.kind
   of NatNone:
     "none"
@@ -46,7 +46,7 @@ proc `$`*(strategy: NatStrategy): string =
   of NatExtIp:
     "extip:" & $strategy.extIp
 
-proc parseNatStrategy*(natConf: string): Result[NatStrategy, string] =
+func parseNatStrategy*(natConf: string): Result[NatStrategy, string] =
   case natConf.toLowerAscii()
   of "any":
     ok(NatStrategy(kind: NatAny))
@@ -57,13 +57,15 @@ proc parseNatStrategy*(natConf: string): Result[NatStrategy, string] =
   of "pmp":
     ok(NatStrategy(kind: NatPmp))
   else:
-    if not natConf.startsWith("extip:"):
+    const ExtIpPrefix = "extip:"
+    if not natConf.startsWith(ExtIpPrefix):
       return err("not a valid NAT mechanism: " & natConf)
+    let ipStr = natConf[ExtIpPrefix.len ..^ 1]
     let ip =
       try:
-        parseIpAddress(natConf[6 ..^ 1])
+        parseIpAddress(ipStr)
       except ValueError:
-        return err("not a valid IP address: " & natConf[6 ..^ 1])
+        return err("not a valid IP address: " & ipStr)
     ok(NatStrategy(kind: NatExtIp, extIp: ip))
 
 type FallbackPortMapper* = ref object of PortMapper
@@ -74,7 +76,7 @@ type FallbackPortMapper* = ref object of PortMapper
   candidates: seq[PortMapper]
   active: PortMapper
 
-proc new*(T: typedesc[FallbackPortMapper], candidates: varargs[PortMapper]): T =
+func new*(T: typedesc[FallbackPortMapper], candidates: varargs[PortMapper]): T =
   T(candidates: @candidates)
 
 method discover*(
@@ -94,7 +96,7 @@ method discover*(
       self.candidates = @[]
       return res
     errors.add(res.error)
-  err("all NAT port mappers failed discovery: " & errors.join("; "))
+  return err("all NAT port mappers failed discovery: " & errors.join("; "))
 
 method map*(
     self: FallbackPortMapper,
@@ -105,14 +107,14 @@ method map*(
 ): Future[Result[Port, string]] {.async: (raises: [CancelledError]), gcsafe.} =
   if self.active.isNil():
     return err("no active NAT port mapper; discovery has not succeeded")
-  await self.active.map(internalPort, externalPort, proto, lease)
+  return await self.active.map(internalPort, externalPort, proto, lease)
 
 method unmap*(
     self: FallbackPortMapper, externalPort: Port, proto: MapProto
 ): Future[Result[void, string]] {.async: (raises: [CancelledError]), gcsafe.} =
   if self.active.isNil():
     return err("no active NAT port mapper; discovery has not succeeded")
-  await self.active.unmap(externalPort, proto)
+  return await self.active.unmap(externalPort, proto)
 
 method close*(self: FallbackPortMapper) {.async: (raises: []), gcsafe.} =
   if not self.active.isNil():
@@ -132,7 +134,7 @@ const NatDiscoveryTimeout = 1.seconds
   ## gateways five times the 200ms window nim-eth's setupNat allowed them
   ## before the libp2p NATService migration.
 
-proc toNatConfig*(strategy: NatStrategy): Opt[NATConfig] =
+func toNatConfig*(strategy: NatStrategy): Opt[NATConfig] =
   ## The libp2p `NATConfig` for a strategy, or none when no NATService is
   ## wanted. `NatExtIp` is deliberately not mapped: the static external IP is
   ## folded into `NetConfig`/the ENR before the switch exists, and libp2p's
