@@ -9,7 +9,9 @@
 
 import
   std/[net, strutils],
-  chronos, chronicles, results,
+  chronos,
+  chronicles,
+  results,
   libp2p/services/natservice,
   libp2p/services/nat/[portmapper, upnp_mapper, natpmp_mapper]
 
