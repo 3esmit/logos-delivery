@@ -73,8 +73,9 @@ func parseNatStrategy*(natConf: string): Result[NatStrategy, string] =
 type FallbackPortMapper* = ref object of PortMapper
   ## `--nat any`: try UPnP first, then NAT-PMP. Candidates are probed in
   ## order at discovery time and the first one that finds an external IP
-  ## becomes the active mapper; the losers are closed. Once a mapper is
-  ## active it is never re-elected.
+  ## becomes the active mapper. All candidates are kept: when the active
+  ## mapper later stops finding the gateway (reboot, mechanism change), the
+  ## next discovery re-elects among them.
   candidates: seq[PortMapper]
   active: PortMapper
 
@@ -85,17 +86,17 @@ method discover*(
     self: FallbackPortMapper, timeout: Duration
 ): Future[Result[IpAddress, string]] {.async: (raises: [CancelledError]), gcsafe.} =
   if not self.active.isNil():
-    return await self.active.discover(timeout)
+    let res = await self.active.discover(timeout)
+    if res.isOk():
+      return res
+    debug "active NAT port mapper lost the gateway; re-electing", err = res.error
+    self.active = nil
 
   var errors: seq[string]
   for candidate in self.candidates:
     let res = await candidate.discover(timeout)
     if res.isOk():
       self.active = candidate
-      for other in self.candidates:
-        if other != candidate:
-          await other.close()
-      self.candidates = @[]
       return res
     errors.add(res.error)
   return err("all NAT port mappers failed discovery: " & errors.join("; "))
@@ -119,9 +120,7 @@ method unmap*(
   return await self.active.unmap(externalPort, proto)
 
 method close*(self: FallbackPortMapper) {.async: (raises: []), gcsafe.} =
-  if not self.active.isNil():
-    await self.active.close()
-    self.active = nil
+  self.active = nil
   for candidate in self.candidates:
     await candidate.close()
   self.candidates = @[]
@@ -175,26 +174,31 @@ method unmap*(
 method close*(self: RetryingPortMapper) {.async: (raises: []), gcsafe.} =
   await self.inner.close()
 
-const NatDiscoveryTimeout = 1.seconds
-  ## Bounds the gateway discovery the NATService performs during switch
-  ## start. Node start awaits discovery, and miniupnpc repeats its SSDP
-  ## probe rounds each waiting the full timeout, so on networks without a
-  ## gateway the start stall is several times this value per mechanism
-  ## (observed: 44s at libp2p's 10-second default, 20s at 3 seconds). One
-  ## second keeps the worst-case stall in single digits while still giving
-  ## gateways five times the 200ms window nim-eth's setupNat allowed them
-  ## before the libp2p NATService migration.
+const DefaultNatDiscoveryTimeoutMs* = 1000'u32
+  ## Default bound for the gateway discovery the NATService performs during
+  ## switch start (configurable via the endpoint config). Node start awaits
+  ## discovery, and miniupnpc repeats its SSDP probe rounds each waiting the
+  ## full timeout, so on networks without a gateway the start stall is
+  ## several times this value per mechanism (observed: 44s at libp2p's
+  ## 10-second default, 20s at 3 seconds). One second keeps the worst-case
+  ## stall in single digits while still giving gateways five times the 200ms
+  ## window nim-eth's setupNat allowed them before the libp2p NATService
+  ## migration.
 
-func toNatConfig*(strategy: NatStrategy): Opt[NATConfig] =
+const NatDiscoveryTimeout = DefaultNatDiscoveryTimeoutMs.int64.milliseconds
+
+func toNatConfig*(
+    strategy: NatStrategy, discoveryTimeout = NatDiscoveryTimeout
+): Opt[NATConfig] =
   ## The libp2p `NATConfig` for a strategy, or none when no NATService is
   ## wanted. `NatExtIp` is deliberately not mapped: the static external IP is
   ## folded into `NetConfig`/the ENR before the switch exists, and libp2p's
   ## explicit-ip address mapper would drop dns4 announced addresses.
   case strategy.kind
   of NatUpnp, NatAny:
-    Opt.some(upnpConfig(discoveryTimeout = NatDiscoveryTimeout))
+    Opt.some(upnpConfig(discoveryTimeout = discoveryTimeout))
   of NatPmp:
-    Opt.some(natPmpConfig(discoveryTimeout = NatDiscoveryTimeout))
+    Opt.some(natPmpConfig(discoveryTimeout = discoveryTimeout))
   of NatNone, NatExtIp:
     Opt.none(NATConfig)
 
@@ -224,7 +228,7 @@ proc natPortMapperFactory*(strategy: NatStrategy): PortMapperFactory =
       Opt.none(PortMapper)
 
 proc mapPermanentUdpPort*(
-    mapper: PortMapper, port: Port
+    mapper: PortMapper, port: Port, discoveryTimeout = NatDiscoveryTimeout
 ): Future[Result[tuple[externalIp: IpAddress, externalPort: Port], string]] {.
     async: (raises: [CancelledError])
 .} =
@@ -234,14 +238,14 @@ proc mapPermanentUdpPort*(
   ## permanent lease (24h observed), after which the mapping lapses until
   ## the next start. A leftover entry from a crashed run is reclaimed by the
   ## retrier's delete-and-re-add.
-  let externalIp = (await mapper.discover(NatDiscoveryTimeout)).valueOr:
+  let externalIp = (await mapper.discover(discoveryTimeout)).valueOr:
     return err("NAT discovery failed: " & error)
   let externalPort = (await mapper.map(port, port, mpUdp, 0)).valueOr:
     return err("NAT port mapping failed: " & error)
   return ok((externalIp: externalIp, externalPort: externalPort))
 
 proc mapPermanentUdpPort*(
-    strategy: NatStrategy, port: Port
+    strategy: NatStrategy, port: Port, discoveryTimeout = NatDiscoveryTimeout
 ): Future[Result[tuple[externalIp: IpAddress, externalPort: Port], string]] {.
     async: (raises: [CancelledError])
 .} =
@@ -253,6 +257,6 @@ proc mapPermanentUdpPort*(
   let mapper = factory(PortMappingMode.Upnp).valueOr:
     return err("could not construct NAT port mapper")
   try:
-    return await mapPermanentUdpPort(mapper, port)
+    return await mapPermanentUdpPort(mapper, port, discoveryTimeout)
   finally:
     await mapper.close()

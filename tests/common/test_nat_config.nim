@@ -122,7 +122,7 @@ proc stub(ip = ""): StubMapper =
   StubMapper(ip: address)
 
 suite "NAT config - fallback port mapper":
-  asyncTest "first successful candidate is elected and the rest are closed":
+  asyncTest "first successful candidate is elected, the rest are kept":
     let
       first = stub("203.0.113.1")
       second = stub("203.0.113.2")
@@ -132,7 +132,7 @@ suite "NAT config - fallback port mapper":
     check:
       $res.get() == "203.0.113.1"
       second.discoverCalls == 0 # never probed, first already won
-      second.closeCalls == 1 # loser is closed
+      second.closeCalls == 0 # kept for possible re-election
       first.closeCalls == 0
 
   asyncTest "discovery falls back to the next candidate":
@@ -145,9 +145,9 @@ suite "NAT config - fallback port mapper":
     check:
       $res.get() == "203.0.113.2"
       first.discoverCalls == 1
-      first.closeCalls == 1
+      first.closeCalls == 0 # kept for possible re-election
 
-  asyncTest "an elected mapper is never re-elected":
+  asyncTest "a healthy active mapper is not re-elected":
     let
       first = stub("203.0.113.1")
       second = stub("203.0.113.2")
@@ -158,6 +158,21 @@ suite "NAT config - fallback port mapper":
     check:
       first.discoverCalls == 2 # re-discovery delegates to the active mapper
       second.discoverCalls == 0
+
+  asyncTest "a failing active mapper triggers re-election":
+    let
+      first = stub("203.0.113.1")
+      second = stub("203.0.113.2")
+      mapper = FallbackPortMapper.new(first, second)
+
+    discard await mapper.discover(1.seconds)
+    # the elected mapper stops finding the gateway (reboot, mechanism gone)
+    first.ip = Opt.none(IpAddress)
+
+    let res = await mapper.discover(1.seconds)
+    check:
+      res.isOk()
+      $res.get() == "203.0.113.2" # the other candidate takes over
 
   asyncTest "discovery reports every candidate failure":
     let mapper = FallbackPortMapper.new(stub(), stub())

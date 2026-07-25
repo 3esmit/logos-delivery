@@ -148,6 +148,7 @@ type WakuConfBuilder* = object
   logFormat: Opt[logging.LogFormat]
 
   natStrategy: Opt[string]
+  natDiscoveryTimeoutMs: Opt[uint32]
 
   p2pTcpPort: Opt[Port]
   p2pListenAddress: Opt[IpAddress]
@@ -294,6 +295,9 @@ proc withNatStrategy*(b: var WakuConfBuilder, natStrategy: string) =
   # the default applies.
   if natStrategy != "":
     b.natStrategy = Opt.some(natStrategy)
+
+proc withNatDiscoveryTimeoutMs*(b: var WakuConfBuilder, timeoutMs: uint32) =
+  b.natDiscoveryTimeoutMs = Opt.some(timeoutMs)
 
 proc withAgentString*(b: var WakuConfBuilder, agentString: string) =
   b.agentString = Opt.some(agentString)
@@ -819,6 +823,8 @@ proc build*(
     # TODO: Separate builders
     endpointConf: EndpointConf(
       natStrategy: natStrategy,
+      natDiscoveryTimeoutMs:
+        builder.natDiscoveryTimeoutMs.get(DefaultNatDiscoveryTimeoutMs),
       p2pTcpPort: p2pTcpPort,
       dns4DomainName: dns4DomainName,
       p2pListenAddress: p2pListenAddress,
