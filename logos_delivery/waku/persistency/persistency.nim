@@ -144,9 +144,11 @@ proc reset*(T: type Persistency) {.gcsafe.} =
     defer:
       release(gPersistencyLock)
     if gPersistency != nil:
-      let p = gPersistency
+      ## Keep the singleton as an owning reference until its jobs are closed.
+      ## With ref-counted memory management, clearing this global first can
+      ## destroy the final instance before `close()` reads its job table.
+      gPersistency.close()
       gPersistency = nil
-      p.close()
 
 proc instance*(
     T: type Persistency, rootDir: string
