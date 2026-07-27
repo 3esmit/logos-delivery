@@ -170,9 +170,10 @@ proc mountRestApi*(client: MessagingClient) =
   ## after the messaging layer has started. Lives here (not in the core
   ## `messaging_client` module) so the core need not depend on the REST layer
   ## above it — that would form an import cycle.
-  if not client.waku.restServer.isNil():
+  if not client.waku.restServer.isNil() and client.needsRestApiMount():
     # The BTree route table is ref-backed, so mutating the copied router persists
     # (same pattern as the waku REST builder).
     var router = client.waku.restServer.router
     installMessagingApiHandlers(router, client)
+    client.markRestApiMounted()
     info "Mounted messaging REST API endpoints"

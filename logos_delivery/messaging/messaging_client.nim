@@ -18,6 +18,9 @@ type MessagingClient* = ref object
   sendService*: SendService
   recvService*: RecvService
   started*: bool
+  ## The REST router is owned by Waku and persists across node restarts.
+  ## Avoid registering the same MessagingClient routes more than once.
+  restApiMounted: bool
 
 proc new*(
     T: type MessagingClient, conf: MessagingClientConf, waku: Waku
@@ -37,6 +40,16 @@ proc new*(
       brokerCtx: waku.brokerCtx,
     )
   )
+
+proc needsRestApiMount*(self: MessagingClient): bool =
+  ## The REST integration layer uses this to avoid duplicate router entries
+  ## after a MessagingClient stop/start cycle.
+  not self.restApiMounted
+
+proc markRestApiMounted*(self: MessagingClient) =
+  ## Record successful REST router setup. The router stays alive until Waku is
+  ## destroyed, even while its HTTP listener is stopped.
+  self.restApiMounted = true
 
 proc checkApiAvailability*(self: MessagingClient): Result[void, string] =
   ## Shared guard for the api operation module.
