@@ -77,3 +77,13 @@ suite "Persistency singleton":
     Persistency.reset()
     Persistency.reset()
     check Persistency.instance().isErr
+
+  test "reset() safely tears down a singleton with no caller reference":
+    let root = tmpRoot("global-only-reset")
+    defer:
+      removeDir(root)
+
+    discard Persistency.instance(root).get()
+    Persistency.reset()
+
+    check Persistency.instance().isErr
