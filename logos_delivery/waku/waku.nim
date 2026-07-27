@@ -83,6 +83,9 @@ type Waku* = ref object ## Implements `KernelApi` (ops in `waku/api/*`).
   healthMonitor*: NodeHealthMonitor
 
   restServer*: WakuRestServerRef
+  ## REST routes belong to the server router, which outlives a stop/start
+  ## cycle. Install protocol routes once, then only resume the HTTP server.
+  restProtocolSupportInstalled: bool
   metricsServer*: MetricsHttpServerRef
   appCallbacks*: AppCallbacks
 
@@ -483,18 +486,31 @@ proc start*(waku: Waku): Future[Result[void, string]] {.async: (raises: []).} =
     error "Failed to set RequestHealthReport provider", error = error
 
   if conf.restServerConf.isSome():
-    rest_server_builder.startRestServerProtocolSupport(
-      waku.restServer,
-      waku.node,
-      waku.wakuDiscv5,
-      conf.restServerConf.get(),
-      conf.relay,
-      conf.lightPush,
-      conf.clusterId,
-      conf.subscribeShards,
-      conf.contentTopics,
-    ).isOkOr:
-      return err ("Starting protocols support REST server failed: " & $error)
+    if waku.restServer.isNil():
+      return err("REST server is not initialized")
+
+    if not waku.restProtocolSupportInstalled:
+      rest_server_builder.startRestServerProtocolSupport(
+        waku.restServer,
+        waku.node,
+        waku.wakuDiscv5,
+        conf.restServerConf.get(),
+        conf.relay,
+        conf.lightPush,
+        conf.clusterId,
+        conf.subscribeShards,
+        conf.contentTopics,
+      ).isOkOr:
+        return err ("Starting protocols support REST server failed: " & $error)
+      waku.restProtocolSupportInstalled = true
+
+    case waku.restServer.state()
+    of RestServerState.Stopped:
+      waku.restServer.start()
+    of RestServerState.Running:
+      discard
+    of RestServerState.Closed:
+      return err("REST server cannot be restarted after it was closed")
 
   if conf.metricsServerConf.isSome():
     try:

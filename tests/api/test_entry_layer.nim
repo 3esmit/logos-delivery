@@ -7,7 +7,7 @@ import logos_delivery
 import
   logos_delivery/api/conf/logos_delivery_conf,
   logos_delivery/messaging/rest_api/client as messaging_rest_client,
-  logos_delivery/waku/rest_api/endpoint/client
+  logos_delivery/waku/rest_api/endpoint/[client, server]
 import tools/confutils/cli_args
 import ../testlib/testasync
 
@@ -106,6 +106,29 @@ suite "LogosDelivery - entry layer selection":
 
     (await node.stop()).isOkOr:
       raiseAssert "stop failed: " & error
+
+  asyncTest "messaging + rest: REST routes and server survive restart":
+    ## `stop` pauses the HTTP server but retains its router. A subsequent
+    ## `start` must resume the listener without registering duplicate routes.
+    var node: LogosDelivery
+    lockNewGlobalBrokerContext:
+      node = (await LogosDelivery.new(nodeConf(EntryLayer.messaging, rest = true))).valueOr:
+        raiseAssert error
+      (await node.start()).isOkOr:
+        raiseAssert "first start failed: " & error
+      (await node.stop()).isOkOr:
+        raiseAssert "stop failed: " & error
+      (await node.start()).isOkOr:
+        raiseAssert "restart failed: " & error
+
+    check node.waku.restServer.state() == RestServerState.Running
+
+    let client = restClientFor(node)
+    let response = await client.messagingGetSendEventsV1()
+    check response.status == 200
+
+    (await node.stop()).isOkOr:
+      raiseAssert "final stop failed: " & error
 
   asyncTest "kernel + rest: messaging REST endpoints are NOT installed":
     ## Gating check: a kernel-only node still starts a REST server, but the
