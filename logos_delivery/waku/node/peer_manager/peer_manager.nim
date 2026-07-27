@@ -104,6 +104,9 @@ type PeerManager* = ref object of RootObj
   ipTable*: Table[string, seq[PeerId]]
   colocationLimit*: int
   started: bool
+  relayConnectivityLoopFut: Future[void]
+  prunePeerStoreLoopFut: Future[void]
+  logAndMetricsFut: Future[void]
   shardedPeerManagement: bool # temp feature flag
   onConnectionChange*: ConnectionChangeHandler
   online: bool ## state managed by online_monitor module
@@ -872,7 +875,8 @@ proc onPeerEvent(pm: PeerManager, peerId: PeerId, event: PeerEvent) {.async.} =
 #~~~~~~~~~~~~~~~~~#
 
 proc logAndMetrics(pm: PeerManager) {.async.} =
-  heartbeat "Scheduling log and metrics run", LogAndMetricsInterval:
+  var nextHeartbeat = Moment.now()
+  while pm.started:
     var peerStore = pm.switch.peerStore
     # log metrics
     let (inRelayPeers, outRelayPeers) = pm.connectedPeers(WakuRelayCodec)
@@ -927,6 +931,28 @@ proc logAndMetrics(pm: PeerManager) {.async.} =
       waku_connected_peers_per_shard.set(
         connectedInShard.len.float64, labelValues = [$shard]
       )
+
+    nextHeartbeat += LogAndMetricsInterval
+    let now = Moment.now()
+    if nextHeartbeat < now:
+      let
+        delay = now - nextHeartbeat
+        interval = LogAndMetricsInterval
+
+      if delay > interval:
+        info "Missed multiple heartbeats",
+          heartbeat = "Scheduling log and metrics run",
+          delay = delay,
+          hinterval = interval
+      else:
+        info "Missed heartbeat",
+          heartbeat = "Scheduling log and metrics run",
+          delay = delay,
+          hinterval = interval
+
+      nextHeartbeat = now + interval
+
+    await sleepAsync(nextHeartbeat - now)
 
 proc getOnlineStateObserver*(pm: PeerManager): OnOnlineStateChange =
   return proc(online: bool) {.gcsafe, raises: [].} =
@@ -1154,13 +1180,28 @@ proc setShardGetter*(pm: PeerManager, c: GetShards) =
   pm.getShards = c
 
 proc start*(pm: PeerManager) =
-  pm.started = true
-  asyncSpawn pm.relayConnectivityLoop()
-  asyncSpawn pm.prunePeerStoreLoop()
-  asyncSpawn pm.logAndMetrics()
+  if pm.started:
+    return
 
-proc stop*(pm: PeerManager) =
+  pm.started = true
+  pm.relayConnectivityLoopFut = pm.relayConnectivityLoop()
+  pm.prunePeerStoreLoopFut = pm.prunePeerStoreLoop()
+  pm.logAndMetricsFut = pm.logAndMetrics()
+
+proc stop*(pm: PeerManager) {.async: (raises: []).} =
   pm.started = false
+
+  if not pm.relayConnectivityLoopFut.isNil():
+    await pm.relayConnectivityLoopFut.cancelAndWait()
+    pm.relayConnectivityLoopFut = nil
+
+  if not pm.prunePeerStoreLoopFut.isNil():
+    await pm.prunePeerStoreLoopFut.cancelAndWait()
+    pm.prunePeerStoreLoopFut = nil
+
+  if not pm.logAndMetricsFut.isNil():
+    await pm.logAndMetricsFut.cancelAndWait()
+    pm.logAndMetricsFut = nil
 
 proc new*(
     T: type PeerManager,

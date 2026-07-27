@@ -23,17 +23,24 @@ suite "WakuNode - restart (#3979)":
     # node1 learns node2 as a relay peer, so a restart triggers reconnectRelayPeers.
     await node1.connectToNodes(@[node2.peerInfo.toRemotePeerInfo()])
 
-    await node1.stop()
+    # The factory starts this maintenance loop after the Waku node. Its workers
+    # must be cancelled before the transport is stopped and recreated.
+    node1.peerManager.start()
 
-    # The restart must complete promptly and yield a usable, listening node.
-    let startFut = node1.start()
-    let restarted = await startFut.withTimeout(20.seconds)
-    if not restarted:
-      await startFut.cancelAndWait()
+    for _ in 0 ..< 3:
+      await node1.stop()
 
-    check:
-      restarted
-      node1.started
-      node1.switch.peerInfo.listenAddrs.len > 0
+      # The restart must complete promptly and yield a usable, listening node.
+      let startFut = node1.start()
+      let restarted = await startFut.withTimeout(20.seconds)
+      if not restarted:
+        await startFut.cancelAndWait()
+
+      check:
+        restarted
+        node1.started
+        node1.switch.peerInfo.listenAddrs.len > 0
+
+      node1.peerManager.start()
 
     await allFutures(node1.stop(), node2.stop())

@@ -662,10 +662,11 @@ proc stop*(node: WakuNode) {.async.} =
   if not node.wakuKademlia.isNil():
     await node.wakuKademlia.stop()
 
+  # Peer-manager loops access the switch, so they must finish before its transports stop.
+  await node.peerManager.stop()
+
   ## NOTE: This will dispatch gossipsub stop to the WakuRelay.stop method override
   await node.switch.stop()
-
-  node.peerManager.stop()
 
   if not node.rln.isNil():
     try:
