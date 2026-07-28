@@ -52,7 +52,7 @@ endif
 	@echo "Rebuilding nat-libs from $(NAT_TRAVERSAL_NIMBLEDEPS_DIR)"
 ifeq ($(OS), Windows_NT)
 	+ "$(MAKE)" -C "$(NAT_TRAVERSAL_NIMBLEDEPS_DIR)/vendor/miniupnp/miniupnpc" \
-		-f Makefile.mingw CC=$(CC) clean $(HANDLE_OUTPUT)
+		-f Makefile.mingw CC=$(CC) RM="rm -f" clean $(HANDLE_OUTPUT)
 	+ PATH=".;$${PATH}" "$(MAKE)" -C "$(NAT_TRAVERSAL_NIMBLEDEPS_DIR)/vendor/miniupnp/miniupnpc" \
 		-f Makefile.mingw CC=$(CC) CFLAGS="-Os -fPIC" libminiupnpc.a $(HANDLE_OUTPUT)
 	$(call verify_nat_archive_members,$(NAT_TRAVERSAL_NIMBLEDEPS_DIR)/vendor/miniupnp/miniupnpc/libminiupnpc.a,$(NAT_MINIUPNPC_REQUIRED_MEMBERS))

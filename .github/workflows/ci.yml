@@ -36,6 +36,7 @@ jobs:
           - 'nimble.lock'
           - 'logos_delivery.nimble'
           - 'Makefile'
+          - 'Nat.mk'
           - 'scripts/**'
           - 'flake.nix'
           - 'flake.lock'
