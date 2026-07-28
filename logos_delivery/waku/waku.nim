@@ -537,8 +537,6 @@ proc stop*(waku: Waku): Future[Result[void, string]] {.async: (raises: []).} =
   try:
     waku.healthMonitor.setOverallHealth(HealthStatus.SHUTTING_DOWN)
 
-    Persistency.reset()
-
     if not waku.metricsServer.isNil():
       await waku.metricsServer.stop()
 
@@ -561,6 +559,11 @@ proc stop*(waku: Waku): Future[Result[void, string]] {.async: (raises: []).} =
 
     if not waku.restServer.isNil():
       await waku.restServer.stop()
+
+    ## Protocol callbacks and their worker threads can retain persistency jobs
+    ## until the node, services, and REST routes have all quiesced. Resetting
+    ## earlier lets live traffic race the job shutdown.
+    Persistency.reset()
   except Exception:
     error "waku stop failed: " & getCurrentExceptionMsg()
     return err("waku stop failed: " & getCurrentExceptionMsg())

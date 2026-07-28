@@ -497,6 +497,68 @@ suite "Reliable Channel - SDS persistence":
 
     (await waku.stop()).expect("stop")
 
+  asyncTest "active SDS state stops after node teardown and restarts":
+    ## A running Delivery node owns both live Waku protocol workers and the
+    ## shared SDS persistency job. Stop must quiesce the former before it closes
+    ## the latter, then permit a clean restart on the same storage path.
+    const
+      channelId = ChannelId("sds-stop-order-channel")
+      contentTopic = ContentTopic("/reliable-channel/test/stop-order")
+
+    Persistency.reset()
+    let root = getTempDir() / ("reliable_channel_stop_order_" & $epochTime().int)
+    if dirExists(root):
+      removeDir(root)
+    defer:
+      Persistency.reset()
+      if dirExists(root):
+        removeDir(root)
+
+    var conf = createApiNodeConf()
+    conf.localStoragePath = root
+
+    var waku: LogosDelivery
+    var manager: ReliableChannelManager
+    lockNewGlobalBrokerContext:
+      waku = (await LogosDelivery.new(conf)).expect("LogosDelivery.new")
+      (await waku.start()).expect("first start")
+      manager = waku.reliableChannelManager
+
+    MessagingSend.replaceProvider(
+      globalBrokerContext(),
+      proc(envelope: MessageEnvelope): Future[Result[RequestId, string]] {.async.} =
+        return ok(RequestId("stop-order-message")),
+    ).isOkOr:
+      raiseAssert "replaceProvider failed: " & error
+
+    discard manager
+      .createReliableChannel(channelId, contentTopic, SdsParticipantID("local"))
+      .expect("createReliableChannel")
+    discard (await manager.send(channelId, "stop safely".toBytes())).expect("send")
+
+    let persistency = Persistency.instance().expect("persistency initialized")
+    let job = persistency.openJob("sds").expect("sds job")
+    let channelKey = toKey(SdsChannelID(channelId))
+    var persisted = false
+    let deadline = Moment.now() + 2.seconds
+    while Moment.now() < deadline:
+      let meta = await job.exists(CatMeta, channelKey)
+      if meta.isOk() and meta.get():
+        persisted = true
+        break
+      await sleepAsync(5.milliseconds)
+    check persisted
+
+    (await waku.stop()).expect("stop")
+    check:
+      not waku.waku.node.started
+      not job.running
+      Persistency.instance().isErr()
+
+    (await waku.start()).expect("restart")
+    check waku.waku.node.started
+    (await waku.stop()).expect("final stop")
+
 ## A marked WakuMessage carrying an SDS envelope, as it arrives off the wire.
 proc sdsWakuMessage(contentTopic: ContentTopic, sdsWire: seq[byte]): WakuMessage =
   WakuMessage(
