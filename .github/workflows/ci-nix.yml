@@ -13,22 +13,24 @@ jobs:
       fail-fast: false
       matrix:
         system:
-          - aarch64-darwin
           - x86_64-linux
         nixpkg:
           - liblogosdelivery
 
         include:
-          - system: aarch64-darwin
-            runs_on: [self-hosted, macOS, ARM64]
-
           - system: x86_64-linux
-            runs_on: [self-hosted, Linux, X64]
+            runs_on: ubuntu-22.04
 
     name: '${{ matrix.system }} / ${{ matrix.nixpkg }}'
     runs-on: ${{ matrix.runs_on }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25
+        with:
+          diagnostic-endpoint: ""
+          github-token: ""
 
       - name: 'Run Nix build for ${{ matrix.nixpkg }}'
         shell: bash
