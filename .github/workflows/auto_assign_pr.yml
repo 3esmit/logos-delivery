@@ -5,8 +5,11 @@ on:
     types:
       - opened
 
+permissions:
+  pull-requests: write
+
 jobs:
   assign_creator:
     runs-on: ubuntu-22.04
     steps:
-      - uses: toshimaru/auto-author-assign@v1.6.2
+      - uses: toshimaru/auto-author-assign@3e19bfc990cb1cf0589dce95e9f75289bb1e22de # v3.0.3
