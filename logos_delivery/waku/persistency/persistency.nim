@@ -79,6 +79,7 @@ type
 
 var
   gPersistency {.global.}: Persistency
+  gPersistencyRooted {.global.}: bool
   gPersistencyLock {.global.}: Lock
 
 once:
@@ -144,11 +145,19 @@ proc reset*(T: type Persistency) {.gcsafe.} =
     defer:
       release(gPersistencyLock)
     if gPersistency != nil:
-      ## Keep the singleton as an owning reference until its jobs are closed.
-      ## With ref-counted memory management, clearing this global first can
-      ## destroy the final instance before `close()` reads its job table.
-      gPersistency.close()
-      gPersistency = nil
+      ## The FFI library's long-lived async runtime can outlive the temporary
+      ## Result returned by `instance`. Keep an explicit refc root until every
+      ## job has shut down; the global field alone was not sufficient under
+      ## sustained live traffic.
+      let persistency = gPersistency
+      let rooted = gPersistencyRooted
+      try:
+        persistency.close()
+      finally:
+        gPersistency = nil
+        gPersistencyRooted = false
+        if rooted:
+          GC_unref(persistency)
 
 proc instance*(
     T: type Persistency, rootDir: string
@@ -182,6 +191,8 @@ proc instance*(
 
     let p = ?Persistency.new(rootDir)
     gPersistency = p
+    GC_ref(gPersistency)
+    gPersistencyRooted = true
     return ok(p)
 
 proc instance*(T: type Persistency): Result[T, PersistencyError] {.gcsafe.} =
