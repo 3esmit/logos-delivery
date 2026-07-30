@@ -6,6 +6,7 @@ type LogosDeliveryApi* = concept ld
   # --- lifecycle ---
   start(ld) is Future[Result[void, string]]
   stop(ld) is Future[Result[void, string]]
+  shutdown(ld) is Future[Result[void, string]]
 
   # --- health ---
   isOnline(ld) is Future[Result[bool, string]]

@@ -130,6 +130,51 @@ suite "LogosDelivery - entry layer selection":
     (await node.stop()).isOkOr:
       raiseAssert "final stop failed: " & error
 
+  asyncTest "messaging + rest: terminal shutdown releases the REST listener":
+    ## A regular stop deliberately keeps the REST server reusable. Final
+    ## teardown must instead close it so a replacement node can bind its port.
+    var node: LogosDelivery
+    lockNewGlobalBrokerContext:
+      node = (await LogosDelivery.new(nodeConf(EntryLayer.messaging, rest = true))).valueOr:
+        raiseAssert error
+      (await node.start()).isOkOr:
+        raiseAssert "start failed: " & error
+
+    let restPort = node.waku.restServer.localAddress().port
+    (await node.stop()).isOkOr:
+      raiseAssert "stop failed: " & error
+    check node.waku.restServer.state() == RestServerState.Stopped
+
+    (await node.shutdown()).isOkOr:
+      raiseAssert "terminal shutdown failed: " & error
+    check node.waku.restServer.state() == RestServerState.Closed
+
+    let replacement = newSocket()
+    defer:
+      replacement.close()
+    replacement.bindAddr(restPort, "127.0.0.1")
+
+  asyncTest "messaging + rest: terminal shutdown closes an unstarted listener":
+    ## REST essentials bind during node construction, before `start`. Final
+    ## teardown must release that listener without trying to stop an unstarted
+    ## transport node.
+    var node: LogosDelivery
+    lockNewGlobalBrokerContext:
+      node = (await LogosDelivery.new(nodeConf(EntryLayer.messaging, rest = true))).valueOr:
+        raiseAssert error
+
+    let restPort = node.waku.restServer.localAddress().port
+    check node.waku.restServer.state() == RestServerState.Running
+
+    (await node.shutdown()).isOkOr:
+      raiseAssert "terminal shutdown failed: " & error
+    check node.waku.restServer.state() == RestServerState.Closed
+
+    let replacement = newSocket()
+    defer:
+      replacement.close()
+    replacement.bindAddr(restPort, "127.0.0.1")
+
   asyncTest "kernel + rest: messaging REST endpoints are NOT installed":
     ## Gating check: a kernel-only node still starts a REST server, but the
     ## messaging endpoints must be absent (no messaging client to mount them).

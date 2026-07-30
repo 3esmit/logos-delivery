@@ -40,12 +40,15 @@ extern "C"
                        FFICallBack callback,
                        void *userData);
 
-  // Stops the node.
+  // Stops the node while preserving restartable resources, including the REST
+  // listener. Call logosdelivery_destroy for final teardown.
   int logosdelivery_stop_node(void *ctx,
                       FFICallBack callback,
                       void *userData);
 
-  // Destroys an instance of a node created with logosdelivery_create_node
+  // Destroys an instance created with logosdelivery_create_node. This is final:
+  // it stops the node, releases node-owned resources (including HTTP
+  // listeners), then invokes callback. Do not reuse ctx after this call.
   int logosdelivery_destroy(void *ctx,
                     FFICallBack callback,
                     void *userData);

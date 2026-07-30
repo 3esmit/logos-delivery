@@ -71,7 +71,8 @@ int logosdelivery_start_node(
 ```
 
 #### `logosdelivery_stop_node`
-Stops the node.
+Stops the node while preserving restartable resources, including its REST
+listener. Call `logosdelivery_start_node` to resume it on the same context.
 
 ```c
 int logosdelivery_stop_node(
@@ -82,7 +83,9 @@ int logosdelivery_stop_node(
 ```
 
 #### `logosdelivery_destroy`
-Destroys a node instance and frees resources.
+Destroys a node instance and frees its resources. This is final: it stops the
+node, releases its HTTP listeners, and invokes the callback only after teardown
+finishes. Do not reuse `ctx` after calling it.
 
 ```c
 int logosdelivery_destroy(

@@ -1,5 +1,5 @@
 import std/json
-import chronos, chronicles, results, ffi
+import chronos, chronos/threadsync, chronicles, results, ffi
 import libp2p/peerid # pull PeerId pretty string formatting
 import logos_delivery/waku/common/base64
 import
@@ -30,11 +30,114 @@ registerReqFFI(CreateNodeRequest, ctx: ptr FFIContext[LogosDelivery]):
 
     return ok("")
 
+type DestroyCompletion = object
+  signal: ThreadSignalPtr
+  status: Atomic[cint]
+
+proc destroyCompletionCallback(
+    callerRet: cint, msg: ptr cchar, len: csize_t, userData: pointer
+) {.cdecl, gcsafe, raises: [].} =
+  ## `logosdelivery_destroy` must wait for the FFI-owned node to finish its
+  ## terminal teardown before it can release the FFI context from the caller
+  ## thread. The request callback runs on the FFI thread and wakes that caller.
+  discard msg
+  discard len
+
+  let completion = cast[ptr DestroyCompletion](userData)
+  if completion.isNil():
+    return
+
+  completion.status.store(callerRet)
+  let signaled = completion.signal.fireSync()
+  if signaled.isErr():
+    error "failed to signal Delivery destruction completion", err = signaled.error
+  elif not signaled.get():
+    chronicles.error "timed out signaling Delivery destruction completion"
+
+proc dropNodeEventListeners(waku: Waku) {.async.} =
+  await MessageErrorEvent.dropAllListeners(waku.brokerCtx)
+  await MessageSentEvent.dropAllListeners(waku.brokerCtx)
+  await MessagePropagatedEvent.dropAllListeners(waku.brokerCtx)
+  await MessageReceivedEvent.dropAllListeners(waku.brokerCtx)
+  await EventConnectionStatusChange.dropAllListeners(waku.brokerCtx)
+  await EventShardTopicHealthChange.dropAllListeners(waku.brokerCtx)
+  await WakuPeerEvent.dropAllListeners(waku.brokerCtx)
+  await ChannelMessageReceivedEvent.dropAllListeners(waku.brokerCtx)
+  await ChannelMessageSentEvent.dropAllListeners(waku.brokerCtx)
+  await ChannelMessageErrorEvent.dropAllListeners(waku.brokerCtx)
+
+registerReqFFI(DestroyNodeRequest, ctx: ptr FFIContext[LogosDelivery]):
+  proc(): Future[Result[string, string]] {.async.} =
+    if ctx.myLib.isNil() or ctx.myLib[].isNil():
+      return ok("")
+
+    await dropNodeEventListeners(ctx.myLib[].waku)
+
+    (await ctx.myLib[].shutdown()).isOkOr:
+      let errMsg = $error
+      chronicles.error "DestroyNodeRequest failed", err = errMsg
+      return err(errMsg)
+
+    return ok("")
+
+proc closeDestroyCompletion(completion: ptr DestroyCompletion) =
+  if completion.isNil():
+    return
+
+  completion.signal.close().isOkOr:
+    chronicles.error "failed to close Delivery destruction completion signal", err = $error
+  deallocShared(completion)
+
+proc destroyNode(ctx: ptr FFIContext[LogosDelivery]): Result[cint, string] =
+  ## Synchronously wait for terminal node teardown. The FFI context owns the
+  ## node on its worker thread, while the external destroy entry point must join
+  ## that worker only after its node-owned sockets are released.
+  let completion = cast[ptr DestroyCompletion](allocShared0(sizeof(DestroyCompletion)))
+  completion.signal = ThreadSignalPtr.new().valueOr:
+    deallocShared(completion)
+    return err("couldn't create destruction completion signal: " & $error)
+  completion.status.store(RET_ERR)
+
+  let requestResult = ffi.sendRequestToFFIThread(
+    ctx, DestroyNodeRequest.ffiNewReq(destroyCompletionCallback, completion)
+  )
+  if requestResult.isErr():
+    ## The request may already be queued when dispatch reports a signal error.
+    ## Keep its shared completion storage alive rather than risk a callback use
+    ## after free. The caller receives an error and retains the context.
+    return err("failed to dispatch node destruction: " & requestResult.error)
+
+  let completed = completion.signal.waitSync()
+  if completed.isErr():
+    ## As above, teardown can still finish on the FFI thread after a wait error.
+    ## Leaving the context intact is the only safe outcome for this exceptional
+    ## transport failure.
+    return err("failed to wait for node destruction: " & completed.error)
+  if not completed.get():
+    return err("timed out waiting for node destruction")
+
+  let status = completion.status.load()
+  closeDestroyCompletion(completion)
+  return ok(status)
+
 proc logosdelivery_destroy(
     ctx: ptr FFIContext[LogosDelivery], callback: FFICallBack, userData: pointer
 ): cint {.dynlib, exportc, cdecl.} =
   initializeLibrary()
   checkParams(ctx, callback, userData)
+
+  let shutdownStatus = destroyNode(ctx).valueOr:
+    let msg = "liblogosdelivery error: " & $error
+    callback(RET_ERR, unsafeAddr msg[0], cast[csize_t](len(msg)), userData)
+    return RET_ERR
+
+  if shutdownStatus != RET_OK:
+    ## The owning module may retry a failed terminal teardown. Do not free its
+    ## context before reporting the failure: callers retain that context on an
+    ## error path to restore their normal event callback and retry safely.
+    let msg = "liblogosdelivery error: terminal node shutdown failed"
+    callback(RET_ERR, unsafeAddr msg[0], cast[csize_t](len(msg)), userData)
+    return RET_ERR
 
   ffi.destroyFFIContext(ctx).isOkOr:
     let msg = "liblogosdelivery error: " & $error
@@ -203,16 +306,7 @@ proc logosdelivery_stop_node(
   requireInitializedNode(ctx, "STOP_NODE"):
     return err(errMsg)
 
-  await MessageErrorEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await MessageSentEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await MessagePropagatedEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await MessageReceivedEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await EventConnectionStatusChange.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await EventShardTopicHealthChange.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await WakuPeerEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await ChannelMessageReceivedEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await ChannelMessageSentEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
-  await ChannelMessageErrorEvent.dropAllListeners(ctx.myLib[].waku.brokerCtx)
+  await dropNodeEventListeners(ctx.myLib[].waku)
 
   (await ctx.myLib[].stop()).isOkOr:
     let errMsg = $error

@@ -570,4 +570,20 @@ proc stop*(waku: Waku): Future[Result[void, string]] {.async: (raises: []).} =
 
   return ok()
 
+proc shutdown*(waku: Waku): Future[Result[void, string]] {.async: (raises: []).} =
+  ## Irreversibly stops Waku and releases its HTTP listeners. Unlike `stop`, a
+  ## shut down instance cannot be restarted because closing the REST and metrics
+  ## servers also drops their socket and worker resources.
+  if not waku.node.isNil() and waku.node.started:
+    (await waku.stop()).isOkOr:
+      return err("failed to stop Waku: " & error)
+
+  if not waku.metricsServer.isNil():
+    await waku.metricsServer.close()
+
+  if not waku.restServer.isNil():
+    await waku.restServer.closeWait()
+
+  return ok()
+
 {.pop.}
