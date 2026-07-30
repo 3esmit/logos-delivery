@@ -216,6 +216,19 @@ proc stop*(self: LogosDelivery): Future[Result[void, string]] {.async.} =
 
   return ok()
 
+proc shutdown*(self: LogosDelivery): Future[Result[void, string]] {.async.} =
+  ## Irreversibly stops every layer and releases the transport REST listener.
+  ## `stop` remains restartable; callers use `shutdown` only for final teardown.
+  if not self.reliableChannelManager.isNil():
+    await self.reliableChannelManager.stop()
+  if not self.messagingClient.isNil():
+    await self.messagingClient.stop()
+  if not self.waku.isNil():
+    (await self.waku.shutdown()).isOkOr:
+      return err("failed to shut down Waku: " & error)
+
+  return ok()
+
 proc isOnline*(self: LogosDelivery): Future[Result[bool, string]] {.async.} =
   if self.waku.isNil():
     return err("Waku node is not initialized")
