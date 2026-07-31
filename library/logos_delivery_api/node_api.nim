@@ -34,9 +34,13 @@ proc logosdelivery_destroy(
     ctx: ptr FFIContext[LogosDelivery], callback: FFICallBack, userData: pointer
 ): cint {.dynlib, exportc, cdecl.} =
   initializeLibrary()
+  if not LogosDeliveryFFIPool.isValidCtx(cast[pointer](ctx)):
+    return RET_ERR
   checkParams(ctx, callback, userData)
 
-  ffi.destroyFFIContext(ctx).isOkOr:
+  # Recycle instead of destroy: under refc a full teardown cannot close the
+  # context signal fds, so every create/destroy cycle would leak them.
+  ffi.recycleFFIContext(LogosDeliveryFFIPool, ctx).isOkOr:
     let msg = "liblogosdelivery error: " & $error
     callback(RET_ERR, unsafeAddr msg[0], cast[csize_t](len(msg)), userData)
     return RET_ERR
@@ -55,7 +59,7 @@ proc logosdelivery_create_node(
     echo "error: missing callback in logosdelivery_create_node"
     return nil
 
-  var ctx = ffi.createFFIContext[LogosDelivery]().valueOr:
+  var ctx = ffi.createFFIContext(LogosDeliveryFFIPool).valueOr:
     let msg = "Error in createFFIContext: " & $error
     callback(RET_ERR, unsafeAddr msg[0], cast[csize_t](len(msg)), userData)
     return nil
@@ -68,8 +72,8 @@ proc logosdelivery_create_node(
     let msg = "error in sendRequestToFFIThread: " & $error
     callback(RET_ERR, unsafeAddr msg[0], cast[csize_t](len(msg)), userData)
     # free allocated resources as they won't be available
-    ffi.destroyFFIContext(ctx).isOkOr:
-      chronicles.error "Error in destroyFFIContext after sendRequestToFFIThread during creation",
+    ffi.recycleFFIContext(LogosDeliveryFFIPool, ctx).isOkOr:
+      chronicles.error "Error in recycleFFIContext after sendRequestToFFIThread during creation",
         err = $error
     return nil
 
@@ -77,7 +81,7 @@ proc logosdelivery_create_node(
 
 proc logosdelivery_start_node(
     ctx: ptr FFIContext[LogosDelivery], callback: FFICallBack, userData: pointer
-) {.ffi.} =
+) {.ffiRaw.} =
   requireInitializedNode(ctx, "START_NODE"):
     return err(errMsg)
 
@@ -85,7 +89,7 @@ proc logosdelivery_start_node(
   let sentListener = MessageSentEvent.listen(
     ctx.myLib[].waku.brokerCtx,
     proc(event: MessageSentEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onMessageSent"):
+      emitEvent("onMessageSent"):
         $newJsonEvent("message_sent", event),
   ).valueOr:
     chronicles.error "MessageSentEvent.listen failed", err = $error
@@ -94,7 +98,7 @@ proc logosdelivery_start_node(
   let errorListener = MessageErrorEvent.listen(
     ctx.myLib[].waku.brokerCtx,
     proc(event: MessageErrorEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onMessageError"):
+      emitEvent("onMessageError"):
         $newJsonEvent("message_error", event),
   ).valueOr:
     chronicles.error "MessageErrorEvent.listen failed", err = $error
@@ -103,7 +107,7 @@ proc logosdelivery_start_node(
   let propagatedListener = MessagePropagatedEvent.listen(
     ctx.myLib[].waku.brokerCtx,
     proc(event: MessagePropagatedEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onMessagePropagated"):
+      emitEvent("onMessagePropagated"):
         $newJsonEvent("message_propagated", event),
   ).valueOr:
     chronicles.error "MessagePropagatedEvent.listen failed", err = $error
@@ -112,7 +116,7 @@ proc logosdelivery_start_node(
   let receivedListener = MessageReceivedEvent.listen(
     ctx.myLib[].waku.brokerCtx,
     proc(event: MessageReceivedEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onMessageReceived"):
+      emitEvent("onMessageReceived"):
         $newJsonEvent("message_received", event),
   ).valueOr:
     chronicles.error "MessageReceivedEvent.listen failed", err = $error
@@ -121,7 +125,7 @@ proc logosdelivery_start_node(
   let ConnectionStatusChangeListener = EventConnectionStatusChange.listen(
     ctx.myLib[].waku.brokerCtx,
     proc(event: EventConnectionStatusChange) {.async: (raises: []).} =
-      callEventCallback(ctx, "onConnectionStatusChange"):
+      emitEvent("onConnectionStatusChange"):
         $newJsonEvent("connection_status_change", event),
   ).valueOr:
     chronicles.error "ConnectionStatusChange.listen failed", err = $error
@@ -130,7 +134,7 @@ proc logosdelivery_start_node(
   let shardTopicHealthListener = EventShardTopicHealthChange.listen(
     ctx.myLib[].waku.brokerCtx,
     proc(event: EventShardTopicHealthChange) {.async: (raises: []).} =
-      callEventCallback(ctx, "onTopicHealthChange"):
+      emitEvent("onTopicHealthChange"):
         $(
           %*{
             "eventType": "relay_topic_health_change",
@@ -145,7 +149,7 @@ proc logosdelivery_start_node(
   let peerEventListener = WakuPeerEvent.listen(
     ctx.myLib[].waku.brokerCtx,
     proc(event: WakuPeerEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onConnectionChange"):
+      emitEvent("onConnectionChange"):
         $(
           %*{
             "eventType": "connection_change",
@@ -160,7 +164,7 @@ proc logosdelivery_start_node(
   let channelReceivedListener = ChannelMessageReceivedEvent.listen(
     ctx.myLib[].waku.brokerCtx,
     proc(event: ChannelMessageReceivedEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onChannelMessageReceived"):
+      emitEvent("onChannelMessageReceived"):
         $(
           %*{
             "eventType": "channel_message_received",
@@ -176,7 +180,7 @@ proc logosdelivery_start_node(
   let channelSentListener = ChannelMessageSentEvent.listen(
     ctx.myLib[].waku.brokerCtx,
     proc(event: ChannelMessageSentEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onChannelMessageSent"):
+      emitEvent("onChannelMessageSent"):
         $newJsonEvent("channel_message_sent", event),
   ).valueOr:
     chronicles.error "ChannelMessageSentEvent.listen failed", err = $error
@@ -185,7 +189,7 @@ proc logosdelivery_start_node(
   let channelErrorListener = ChannelMessageErrorEvent.listen(
     ctx.myLib[].waku.brokerCtx,
     proc(event: ChannelMessageErrorEvent) {.async: (raises: []).} =
-      callEventCallback(ctx, "onChannelMessageError"):
+      emitEvent("onChannelMessageError"):
         $newJsonEvent("channel_message_error", event),
   ).valueOr:
     chronicles.error "ChannelMessageErrorEvent.listen failed", err = $error
@@ -199,7 +203,7 @@ proc logosdelivery_start_node(
 
 proc logosdelivery_stop_node(
     ctx: ptr FFIContext[LogosDelivery], callback: FFICallBack, userData: pointer
-) {.ffi.} =
+) {.ffiRaw.} =
   requireInitializedNode(ctx, "STOP_NODE"):
     return err(errMsg)
 
