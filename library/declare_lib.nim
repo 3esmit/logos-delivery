@@ -1,12 +1,30 @@
 import ffi
-import std/locks
 import results
 import logos_delivery
 
-declareLibrary("logosdelivery")
+declareLibrary("logosdelivery", LogosDelivery)
 
-var eventCallbackLock: Lock
-initLock(eventCallbackLock)
+template checkParams*(
+    ctx: ptr FFIContext[LogosDelivery], callback: FFICallBack, userData: pointer
+) =
+  ## Re-implements the `checkParams` helper dropped from nim-ffi in 0.3.0.
+  if not ctx.isNil():
+    ctx[].userData = userData
+  if callback.isNil():
+    return RET_MISSING_CALLBACK
+
+template emitEvent*(eventName: string, body: untyped) =
+  ## Enqueues `body`'s payload for nim-ffi's event thread to fan out to listeners.
+  ## Callers are `{.async: (raises: []).}` broker listeners, and the payload
+  ## builders infer an `Exception` effect, so nothing narrower than `Exception`
+  ## compiles here. That also swallows `Defect`, which is why the handler only
+  ## logs: a defect raised while rendering one event must not take the node down,
+  ## and it cannot be re-raised without breaking the `raises: []` contract.
+  try:
+    dispatchFFIEvent(eventName):
+      body
+  except Exception as e:
+    chronicles.error "failed to emit FFI event", event = eventName, err = e.msg
 
 template requireInitializedNode*(
     ctx: ptr FFIContext[LogosDelivery], opName: string, onError: untyped
@@ -35,18 +53,3 @@ template requireChannels*(
   ctx.myLib[].ensureChannels().isOkOr:
     let errMsg {.inject.} = opName & " failed: " & error
     onError
-
-proc logosdelivery_set_event_callback(
-    ctx: ptr FFIContext[LogosDelivery], callback: FFICallBack, userData: pointer
-) {.dynlib, exportc, cdecl.} =
-  if isNil(ctx):
-    echo "error: invalid context in logosdelivery_set_event_callback"
-    return
-
-  # prevent race conditions that might happen due incorrect usage.
-  eventCallbackLock.acquire()
-  defer:
-    eventCallbackLock.release()
-
-  ctx[].eventCallback = cast[pointer](callback)
-  ctx[].eventUserData = userData

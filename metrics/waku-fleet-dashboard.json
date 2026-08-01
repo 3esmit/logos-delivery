@@ -55,8 +55,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -140,8 +139,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "blue",
-                    "value": null
+                    "color": "blue"
                   }
                 ]
               },
@@ -211,8 +209,7 @@
                 "mode": "percentage",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -295,8 +292,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -361,7 +357,7 @@
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "waku_version{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}",
+              "expr": "(waku_version{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_version{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
               "format": "table",
               "instant": true,
               "legendFormat": "__auto",
@@ -434,8 +430,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -450,7 +445,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 197
+            "y": 290
           },
           "id": 81,
           "options": {
@@ -531,8 +526,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -547,7 +541,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 197
+            "y": 290
           },
           "id": 82,
           "options": {
@@ -630,8 +624,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -647,7 +640,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 206
+            "y": 299
           },
           "id": 78,
           "interval": "15s",
@@ -734,8 +727,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -751,7 +743,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 206
+            "y": 299
           },
           "id": 79,
           "options": {
@@ -851,7 +843,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 215
+            "y": 308
           },
           "id": 124,
           "options": {
@@ -880,7 +872,7 @@
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "avg by(topic, type)(rate(waku_relay_network_bytes_total{direction=\"in\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]))",
+              "expr": "avg by(topic, type)((rate(waku_relay_network_bytes_total{direction=\"in\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]) or rate(logos_delivery_relay_network_bytes_total{direction=\"in\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval])))",
               "instant": false,
               "legendFormat": "{{topic}} - {{type}}",
               "range": true,
@@ -955,7 +947,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 215
+            "y": 308
           },
           "id": 126,
           "options": {
@@ -981,7 +973,7 @@
                 "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
-              "expr": "avg by(topic, type)(rate(waku_relay_network_bytes_total{direction=\"out\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]))",
+              "expr": "avg by(topic, type)((rate(waku_relay_network_bytes_total{direction=\"out\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]) or rate(logos_delivery_relay_network_bytes_total{direction=\"out\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval])))",
               "legendFormat": "{{topic}}",
               "range": true,
               "refId": "A"
@@ -1051,7 +1043,7 @@
             "h": 10,
             "w": 12,
             "x": 0,
-            "y": 225
+            "y": 318
           },
           "id": 169,
           "options": {
@@ -1078,7 +1070,7 @@
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "avg by (protocol)(waku_connected_peers{direction=\"In\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"})",
+              "expr": "avg by (protocol)((waku_connected_peers{direction=\"In\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} or logos_delivery_connected_peers{direction=\"In\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}))",
               "instant": false,
               "legendFormat": "{{protocol}}",
               "range": true,
@@ -1149,7 +1141,7 @@
             "h": 10,
             "w": 12,
             "x": 12,
-            "y": 225
+            "y": 318
           },
           "id": 170,
           "options": {
@@ -1176,7 +1168,7 @@
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "avg by (protocol)(waku_connected_peers{direction=\"Out\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"})",
+              "expr": "avg by (protocol)((waku_connected_peers{direction=\"Out\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} or logos_delivery_connected_peers{direction=\"Out\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}))",
               "instant": false,
               "legendFormat": "{{protocol}}",
               "range": true,
@@ -1252,7 +1244,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 235
+            "y": 328
           },
           "id": 11,
           "options": {
@@ -1277,7 +1269,7 @@
               },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "(increase(waku_node_messages_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[1m]))",
+              "expr": "((increase(waku_node_messages_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[1m]) or increase(logos_delivery_node_messages_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[1m])))",
               "interval": "",
               "legendFormat": "{{type}}: {{instance}}",
               "range": true,
@@ -1350,7 +1342,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 235
+            "y": 328
           },
           "id": 54,
           "options": {
@@ -1448,7 +1440,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 244
+            "y": 337
           },
           "id": 66,
           "options": {
@@ -1472,7 +1464,7 @@
                 "uid": "P6693426190CB2316"
               },
               "exemplar": true,
-              "expr": "count(count by (contentTopic)(waku_node_messages_total))",
+              "expr": "count(count by (contentTopic)((waku_node_messages_total or logos_delivery_node_messages_total)))",
               "interval": "",
               "legendFormat": "content topics",
               "refId": "A"
@@ -1544,7 +1536,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 244
+            "y": 337
           },
           "id": 122,
           "options": {
@@ -1569,7 +1561,7 @@
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "sum by (type)(increase(waku_peers_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]))",
+              "expr": "sum by (type)((increase(waku_peers_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]) or increase(logos_delivery_peers_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval])))",
               "interval": "",
               "legendFormat": "peer {{type}}",
               "range": true,
@@ -1582,7 +1574,7 @@
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "sum by (type)(increase(waku_store_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]))",
+              "expr": "sum by (type)((increase(waku_store_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]) or increase(logos_delivery_store_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval])))",
               "hide": false,
               "interval": "",
               "legendFormat": "store {{type}}",
@@ -1596,7 +1588,7 @@
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "sum by (type)(increase(waku_node_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]))",
+              "expr": "sum by (type)((increase(waku_node_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]) or increase(logos_delivery_node_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval])))",
               "hide": false,
               "interval": "",
               "legendFormat": "node {{type}}",
@@ -1673,7 +1665,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 253
+            "y": 346
           },
           "id": 68,
           "options": {
@@ -1698,7 +1690,7 @@
               },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "waku_version{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}",
+              "expr": "(waku_version{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} or logos_delivery_version{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"})",
               "interval": "",
               "legendFormat": "{{instance}}:{{version}}",
               "range": true,
@@ -1786,7 +1778,7 @@
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 1559
+            "y": 1652
           },
           "id": 48,
           "options": {
@@ -1882,7 +1874,7 @@
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 1559
+            "y": 1652
           },
           "id": 50,
           "options": {
@@ -1906,7 +1898,7 @@
                 "uid": "P6693426190CB2316"
               },
               "exemplar": true,
-              "expr": "waku_node_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}",
+              "expr": "(waku_node_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_node_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
               "interval": "",
               "legendFormat": "{{type}}: {{instance}}",
               "refId": "A"
@@ -1978,7 +1970,7 @@
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 2461
+            "y": 2554
           },
           "id": 60,
           "options": {
@@ -2099,7 +2091,7 @@
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 2461
+            "y": 2554
           },
           "id": 8,
           "options": {
@@ -2198,7 +2190,7 @@
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 2467
+            "y": 2560
           },
           "id": 2,
           "options": {
@@ -2301,7 +2293,7 @@
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 2467
+            "y": 2560
           },
           "id": 83,
           "options": {
@@ -2325,7 +2317,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "waku_peer_store_size{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}",
+              "expr": "(waku_peer_store_size{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_peer_store_size{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
               "interval": "",
               "legendFormat": "{{instance}}",
               "range": true,
@@ -2399,7 +2391,7 @@
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 2473
+            "y": 2566
           },
           "id": 3,
           "options": {
@@ -2498,7 +2490,7 @@
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 2473
+            "y": 2566
           },
           "id": 9,
           "options": {
@@ -2623,7 +2615,7 @@
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 2479
+            "y": 2572
           },
           "id": 6,
           "options": {
@@ -2720,7 +2712,7 @@
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 2479
+            "y": 2572
           },
           "id": 7,
           "options": {
@@ -2845,7 +2837,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 2485
+            "y": 2578
           },
           "id": 44,
           "options": {
@@ -2967,7 +2959,7 @@
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 2485
+            "y": 2578
           },
           "id": 10,
           "options": {
@@ -3066,7 +3058,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 2491
+            "y": 2584
           },
           "id": 64,
           "options": {
@@ -3168,7 +3160,7 @@
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 2493
+            "y": 2586
           },
           "id": 4,
           "options": {
@@ -3265,7 +3257,7 @@
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 2499
+            "y": 2592
           },
           "id": 5,
           "options": {
@@ -3376,7 +3368,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 1560
+            "y": 1653
           },
           "id": 159,
           "options": {
@@ -3400,7 +3392,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "waku_rln_total_generated_proofs",
+              "expr": "(waku_rln_total_generated_proofs or logos_delivery_rln_total_generated_proofs)",
               "legendFormat": "{{instance}}",
               "range": true,
               "refId": "A"
@@ -3472,7 +3464,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 1560
+            "y": 1653
           },
           "id": 117,
           "options": {
@@ -3496,7 +3488,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "waku_rln_proof_verification_total_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}",
+              "expr": "(waku_rln_proof_verification_total_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_rln_proof_verification_total_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
               "legendFormat": "{{instance}}",
               "range": true,
               "refId": "A"
@@ -3569,7 +3561,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 1560
+            "y": 1653
           },
           "id": 160,
           "options": {
@@ -3593,7 +3585,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "waku_rln_remaining_proofs_per_epoch",
+              "expr": "(waku_rln_remaining_proofs_per_epoch or logos_delivery_rln_remaining_proofs_per_epoch)",
               "legendFormat": "{{instance}}",
               "range": true,
               "refId": "A"
@@ -3666,7 +3658,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1818
+            "y": 1911
           },
           "id": 119,
           "options": {
@@ -3690,7 +3682,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "waku_rln_proof_generation_duration_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}",
+              "expr": "(waku_rln_proof_generation_duration_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} or logos_delivery_rln_proof_generation_duration_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"})",
               "legendFormat": "{{instance}}",
               "range": true,
               "refId": "A"
@@ -3762,7 +3754,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1818
+            "y": 1911
           },
           "id": 121,
           "options": {
@@ -3786,7 +3778,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "waku_rln_proof_verification_duration_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}",
+              "expr": "(waku_rln_proof_verification_duration_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} or logos_delivery_rln_proof_verification_duration_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"})",
               "legendFormat": "{{instance}}",
               "range": true,
               "refId": "A"
@@ -3858,7 +3850,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 1826
+            "y": 1919
           },
           "id": 113,
           "options": {
@@ -3882,7 +3874,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "changes(waku_rln_proof_generation_duration_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[14m])",
+              "expr": "(changes(waku_rln_proof_generation_duration_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[14m]) or changes(logos_delivery_rln_proof_generation_duration_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[14m]))",
               "hide": false,
               "legendFormat": "Proofs generated: {{instance}}",
               "range": true,
@@ -3955,7 +3947,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 1826
+            "y": 1919
           },
           "id": 115,
           "options": {
@@ -3979,7 +3971,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "waku_rln_invalid_messages_total_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}",
+              "expr": "(waku_rln_invalid_messages_total_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_rln_invalid_messages_total_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
               "legendFormat": "{{type}} : {{instance}}",
               "range": true,
               "refId": "A"
@@ -3990,7 +3982,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "waku_rln_spam_messages_total_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}",
+              "expr": "(waku_rln_spam_messages_total_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_rln_spam_messages_total_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
               "hide": false,
               "legendFormat": "spam : {{instance}}",
               "range": true,
@@ -4063,7 +4055,7 @@
                 "steps": [
                   {
                     "color": "green",
-                    "value": null
+                    "value": 0
                   },
                   {
                     "color": "red",
@@ -4094,7 +4086,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.5.2",
+          "pluginVersion": "12.1.0",
           "targets": [
             {
               "datasource": {
@@ -4103,7 +4095,7 @@
               },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "waku_store_peers{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}",
+              "expr": "(waku_store_peers{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_store_peers{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
               "interval": "",
               "legendFormat": "{{instance}}",
               "range": true,
@@ -4162,7 +4154,7 @@
                 "steps": [
                   {
                     "color": "green",
-                    "value": null
+                    "value": 0
                   },
                   {
                     "color": "red",
@@ -4193,7 +4185,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.5.2",
+          "pluginVersion": "12.1.0",
           "targets": [
             {
               "datasource": {
@@ -4215,7 +4207,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "waku_archive_messages{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}",
+              "expr": "(waku_archive_messages{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_archive_messages{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
               "hide": false,
               "legendFormat": "{{type}}: {{instance}}",
               "range": true,
@@ -4274,7 +4266,7 @@
                 "steps": [
                   {
                     "color": "green",
-                    "value": null
+                    "value": 0
                   },
                   {
                     "color": "red",
@@ -4305,7 +4297,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.5.2",
+          "pluginVersion": "12.1.0",
           "targets": [
             {
               "datasource": {
@@ -4314,7 +4306,7 @@
               },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "increase(waku_store_queries_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[1m])",
+              "expr": "(increase(waku_store_queries_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[1m]) or increase(logos_delivery_store_queries_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[1m]))",
               "interval": "",
               "legendFormat": "{{instance}}",
               "range": true,
@@ -4373,7 +4365,7 @@
                 "steps": [
                   {
                     "color": "green",
-                    "value": null
+                    "value": 0
                   },
                   {
                     "color": "red",
@@ -4404,7 +4396,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.5.2",
+          "pluginVersion": "12.1.0",
           "targets": [
             {
               "datasource": {
@@ -4413,7 +4405,7 @@
               },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "sum by (type)(increase(waku_archive_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[1m]))",
+              "expr": "sum by (type)((increase(waku_archive_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[1m]) or increase(logos_delivery_archive_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[1m])))",
               "hide": false,
               "interval": "",
               "legendFormat": "{{type}}",
@@ -4427,7 +4419,7 @@
               },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "sum by (type)(increase(waku_store_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[1m]))",
+              "expr": "sum by (type)((increase(waku_store_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[1m]) or increase(logos_delivery_store_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[1m])))",
               "hide": false,
               "interval": "",
               "legendFormat": "{{type}}",
@@ -4490,7 +4482,7 @@
                 "steps": [
                   {
                     "color": "green",
-                    "value": null
+                    "value": 0
                   }
                 ]
               },
@@ -4525,7 +4517,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.5.2",
+          "pluginVersion": "12.1.0",
           "targets": [
             {
               "datasource": {
@@ -4534,7 +4526,7 @@
               },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "query_time_secs{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", phase=\"sendQuery\"} and deriv(query_time_secs{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", phase=\"sendQuery\"}[1m]) != 0",
+              "expr": "(query_time_secs{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", phase=\"sendQuery\"} or logos_delivery_query_time_secs{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", phase=\"sendQuery\"}) and (deriv(query_time_secs{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", phase=\"sendQuery\"}[1m]) or deriv(logos_delivery_query_time_secs{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", phase=\"sendQuery\"}[1m])) != 0",
               "interval": "",
               "legendFormat": "{{query}}",
               "range": true,
@@ -4595,7 +4587,7 @@
                 "steps": [
                   {
                     "color": "green",
-                    "value": null
+                    "value": 0
                   }
                 ]
               },
@@ -4630,7 +4622,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.5.2",
+          "pluginVersion": "12.1.0",
           "targets": [
             {
               "datasource": {
@@ -4639,7 +4631,7 @@
               },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "query_time_secs{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", phase=\"waitFinish\"} and deriv(query_time_secs{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", phase=\"waitFinish\"}[45s]) != 0",
+              "expr": "(query_time_secs{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", phase=\"waitFinish\"} or logos_delivery_query_time_secs{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", phase=\"waitFinish\"}) and (deriv(query_time_secs{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", phase=\"waitFinish\"}[45s]) or deriv(logos_delivery_query_time_secs{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", phase=\"waitFinish\"}[45s])) != 0",
               "hide": false,
               "interval": "",
               "legendFormat": "{{query}}",
@@ -4648,111 +4640,6 @@
             }
           ],
           "title": "Wait Queries To Finish (sec)",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "P6693426190CB2316"
-          },
-          "description": "",
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "barWidthFactor": 0.6,
-                "drawStyle": "points",
-                "fillOpacity": 3,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "linear",
-                "lineWidth": 2,
-                "pointSize": 10,
-                "scaleDistribution": {
-                  "log": 10,
-                  "type": "log"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  }
-                ]
-              },
-              "unit": "s"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 0,
-            "y": 27
-          },
-          "id": 146,
-          "options": {
-            "legend": {
-              "calcs": [
-                "mean",
-                "max",
-                "min",
-                "stdDev"
-              ],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true,
-              "sortBy": "Mean",
-              "sortDesc": true
-            },
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "pluginVersion": "11.5.2",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "P6693426190CB2316"
-              },
-              "editorMode": "code",
-              "exemplar": true,
-              "expr": "waku_legacy_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} and deriv(waku_legacy_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[45s]) != 0",
-              "interval": "",
-              "legendFormat": "{{phase}}",
-              "range": true,
-              "refId": "A"
-            }
-          ],
-          "title": "Store V2 Times (sec)",
           "type": "timeseries"
         },
         {
@@ -4806,7 +4693,7 @@
                 "steps": [
                   {
                     "color": "green",
-                    "value": null
+                    "value": 0
                   }
                 ]
               },
@@ -4817,7 +4704,7 @@
           "gridPos": {
             "h": 8,
             "w": 12,
-            "x": 12,
+            "x": 0,
             "y": 27
           },
           "id": 148,
@@ -4841,7 +4728,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.5.2",
+          "pluginVersion": "12.1.0",
           "targets": [
             {
               "datasource": {
@@ -4850,7 +4737,7 @@
               },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "waku_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} and deriv(waku_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[45s]) != 0",
+              "expr": "(waku_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} or logos_delivery_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}) and (deriv(waku_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[45s]) or deriv(logos_delivery_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[45s])) != 0",
               "interval": "",
               "legendFormat": "{{phase}}",
               "range": true,
@@ -4858,110 +4745,6 @@
             }
           ],
           "title": "Store V3 Times details",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "P6693426190CB2316"
-          },
-          "description": "Total time from moment query hits nwaku node to response sent over wire. This represents an aggregation and helps to get an idea of current node's response time.",
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "barWidthFactor": 0.6,
-                "drawStyle": "points",
-                "fillOpacity": 3,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "linear",
-                "lineWidth": 2,
-                "pointSize": 10,
-                "scaleDistribution": {
-                  "log": 10,
-                  "type": "log"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  }
-                ]
-              },
-              "unit": "s"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 0,
-            "y": 35
-          },
-          "id": 158,
-          "options": {
-            "legend": {
-              "calcs": [
-                "mean",
-                "max",
-                "min",
-                "stdDev"
-              ],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true,
-              "sortBy": "Mean",
-              "sortDesc": true
-            },
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "pluginVersion": "11.5.2",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "P6693426190CB2316"
-              },
-              "editorMode": "code",
-              "expr": "sum by(instance) (waku_legacy_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} unless deriv(waku_legacy_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[45s]) == 0)\n",
-              "hide": false,
-              "legendFormat": "{{instance}}",
-              "range": true,
-              "refId": "B"
-            }
-          ],
-          "title": "Store V2 Times wire-to-wire",
           "type": "timeseries"
         },
         {
@@ -5015,7 +4798,7 @@
                 "steps": [
                   {
                     "color": "green",
-                    "value": null
+                    "value": 0
                   }
                 ]
               },
@@ -5027,7 +4810,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 35
+            "y": 27
           },
           "id": 157,
           "options": {
@@ -5036,7 +4819,9 @@
                 "mean",
                 "max",
                 "min",
-                "stdDev"
+                "stdDev",
+                "p95",
+                "p90"
               ],
               "displayMode": "table",
               "placement": "bottom",
@@ -5050,15 +4835,15 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.5.2",
+          "pluginVersion": "12.1.0",
           "targets": [
             {
               "datasource": {
                 "type": "prometheus",
                 "uid": "P6693426190CB2316"
               },
-              "editorMode": "builder",
-              "expr": "sum by(instance) (waku_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} unless deriv(waku_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[45s]) == 0)\n",
+              "editorMode": "code",
+              "expr": "sum without (phase) ((waku_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} or logos_delivery_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"})\n  unless (changes(waku_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[45s]) or changes(logos_delivery_store_time_seconds{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[45s])) == 0)",
               "hide": false,
               "legendFormat": "{{instance}}",
               "range": true,
@@ -5118,7 +4903,7 @@
                 "steps": [
                   {
                     "color": "green",
-                    "value": null
+                    "value": 0
                   }
                 ]
               },
@@ -5130,7 +4915,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 43
+            "y": 35
           },
           "id": 149,
           "options": {
@@ -5148,7 +4933,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.5.2",
+          "pluginVersion": "12.1.0",
           "targets": [
             {
               "datasource": {
@@ -5157,7 +4942,7 @@
               },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "rate(query_count_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", query!=\"InsertRow\"}[1m]) and rate(query_count_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", query!=\"InsertRowMessagesLookup\"}[1m]) ",
+              "expr": "(rate(query_count_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", query!=\"InsertRow\"}[1m]) or rate(logos_delivery_query_count_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", query!=\"InsertRow\"}[1m])) and (rate(query_count_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", query!=\"InsertRowMessagesLookup\"}[1m]) or rate(logos_delivery_query_count_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", query!=\"InsertRowMessagesLookup\"}[1m])) ",
               "interval": "",
               "legendFormat": "{{query}}",
               "range": true,
@@ -5217,7 +5002,7 @@
                 "steps": [
                   {
                     "color": "green",
-                    "value": null
+                    "value": 0
                   }
                 ]
               },
@@ -5254,7 +5039,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 43
+            "y": 35
           },
           "id": 147,
           "options": {
@@ -5272,7 +5057,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.5.2",
+          "pluginVersion": "12.1.0",
           "targets": [
             {
               "datasource": {
@@ -5281,7 +5066,7 @@
               },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "rate(query_count_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", query=\"InsertRow\"}[5m])",
+              "expr": "(rate(query_count_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", query=\"InsertRow\"}[5m]) or rate(logos_delivery_query_count_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\", query=\"InsertRow\"}[5m]))",
               "interval": "",
               "legendFormat": "{{query}}",
               "range": true,
@@ -5316,7 +5101,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 51
+            "y": 43
           },
           "id": 77,
           "maxDataPoints": 60,
@@ -5338,7 +5123,7 @@
               "color": "rgba(255,0,255,0.7)"
             },
             "filterValues": {
-              "le": 1e-9
+              "le": 1e-09
             },
             "legend": {
               "show": false
@@ -5359,7 +5144,7 @@
               "unit": "s"
             }
           },
-          "pluginVersion": "11.5.2",
+          "pluginVersion": "12.1.0",
           "targets": [
             {
               "datasource": {
@@ -5367,7 +5152,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "sum(increase(waku_archive_query_duration_seconds_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval])) by (le)",
+              "expr": "sum((increase(waku_archive_query_duration_seconds_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]) or increase(logos_delivery_archive_query_duration_seconds_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]))) by (le)",
               "format": "heatmap",
               "hide": false,
               "legendFormat": "{{le}}",
@@ -5415,7 +5200,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 51
+            "y": 43
           },
           "id": 75,
           "maxDataPoints": 60,
@@ -5437,7 +5222,7 @@
               "color": "rgba(255,0,255,0.7)"
             },
             "filterValues": {
-              "le": 1e-9
+              "le": 1e-09
             },
             "legend": {
               "show": false
@@ -5458,7 +5243,7 @@
               "unit": "s"
             }
           },
-          "pluginVersion": "11.5.2",
+          "pluginVersion": "12.1.0",
           "targets": [
             {
               "datasource": {
@@ -5467,7 +5252,7 @@
               },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "sum(increase(waku_archive_insert_duration_seconds_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval])) by (le)",
+              "expr": "sum((increase(waku_archive_insert_duration_seconds_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]) or increase(logos_delivery_archive_insert_duration_seconds_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]))) by (le)",
               "format": "heatmap",
               "hide": false,
               "instant": false,
@@ -5562,7 +5347,7 @@
                 "steps": [
                   {
                     "color": "green",
-                    "value": null
+                    "value": 0
                   },
                   {
                     "color": "red",
@@ -5578,109 +5363,7 @@
             "h": 13,
             "w": 12,
             "x": 0,
-            "y": 58
-          },
-          "id": 142,
-          "options": {
-            "legend": {
-              "calcs": [
-                "max",
-                "mean"
-              ],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "pluginVersion": "11.5.2",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "PBFA97CFB590B2093"
-              },
-              "editorMode": "code",
-              "expr": "rate(waku_service_network_bytes_total{service=~\"/vac/waku/store/2.*\", direction=\"in\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval])",
-              "legendFormat": "{{instance}}",
-              "range": true,
-              "refId": "A"
-            }
-          ],
-          "title": "Store v2 protocol traffic (in)",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "P6693426190CB2316"
-          },
-          "description": "",
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "barWidthFactor": 0.6,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              },
-              "unit": "binBps"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 13,
-            "w": 12,
-            "x": 12,
-            "y": 58
+            "y": 50
           },
           "id": 130,
           "options": {
@@ -5699,7 +5382,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.5.2",
+          "pluginVersion": "12.1.0",
           "targets": [
             {
               "datasource": {
@@ -5707,7 +5390,7 @@
                 "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
-              "expr": "rate(waku_service_network_bytes_total{service=\"/vac/waku/store-query/3.0.0\", direction=\"in\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval])",
+              "expr": "(rate(waku_service_network_bytes_total{service=\"/vac/waku/store-query/3.0.0\", direction=\"in\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]) or rate(logos_delivery_service_network_bytes_total{service=\"/vac/waku/store-query/3.0.0\", direction=\"in\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]))",
               "legendFormat": "{{instance}}",
               "range": true,
               "refId": "A"
@@ -5766,111 +5449,7 @@
                 "steps": [
                   {
                     "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              },
-              "unit": "binBps"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 13,
-            "w": 12,
-            "x": 0,
-            "y": 71
-          },
-          "id": 132,
-          "options": {
-            "legend": {
-              "calcs": [
-                "max",
-                "mean"
-              ],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true,
-              "sortBy": "Max",
-              "sortDesc": false
-            },
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "pluginVersion": "11.5.2",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "PBFA97CFB590B2093"
-              },
-              "editorMode": "code",
-              "expr": "rate(waku_service_network_bytes_total{service=~\"/vac/waku/store/2.*\", direction=\"out\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval])",
-              "legendFormat": "{{instance}}",
-              "range": true,
-              "refId": "A"
-            }
-          ],
-          "title": "Store v2 protocol traffic (out)",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "P6693426190CB2316"
-          },
-          "description": "",
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "barWidthFactor": 0.6,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
+                    "value": 0
                   },
                   {
                     "color": "red",
@@ -5886,7 +5465,7 @@
             "h": 13,
             "w": 12,
             "x": 12,
-            "y": 71
+            "y": 50
           },
           "id": 143,
           "options": {
@@ -5907,7 +5486,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.5.2",
+          "pluginVersion": "12.1.0",
           "targets": [
             {
               "datasource": {
@@ -5915,7 +5494,7 @@
                 "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
-              "expr": "rate(waku_service_network_bytes_total{service=\"/vac/waku/store-query/3.0.0\", direction=\"out\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval])",
+              "expr": "(rate(waku_service_network_bytes_total{service=\"/vac/waku/store-query/3.0.0\", direction=\"out\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]) or rate(logos_delivery_service_network_bytes_total{service=\"/vac/waku/store-query/3.0.0\", direction=\"out\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]))",
               "legendFormat": "{{instance}}",
               "range": true,
               "refId": "A"
@@ -5974,7 +5553,7 @@
                 "steps": [
                   {
                     "color": "green",
-                    "value": null
+                    "value": 0
                   },
                   {
                     "color": "red",
@@ -5990,111 +5569,7 @@
             "h": 13,
             "w": 12,
             "x": 0,
-            "y": 84
-          },
-          "id": 128,
-          "options": {
-            "legend": {
-              "calcs": [
-                "max",
-                "mean"
-              ],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true,
-              "sortBy": "Max",
-              "sortDesc": true
-            },
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "pluginVersion": "11.5.2",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "PBFA97CFB590B2093"
-              },
-              "editorMode": "code",
-              "expr": "rate(waku_service_requests_total{service =~\"/vac/waku/store/2.*\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval])",
-              "legendFormat": "{{instance}} - {{state}}",
-              "range": true,
-              "refId": "A"
-            }
-          ],
-          "title": "Store v2 query request rates",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "P6693426190CB2316"
-          },
-          "description": "",
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "barWidthFactor": 0.6,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              },
-              "unit": "reqps"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 13,
-            "w": 12,
-            "x": 12,
-            "y": 84
+            "y": 63
           },
           "id": 141,
           "options": {
@@ -6115,7 +5590,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.5.2",
+          "pluginVersion": "12.1.0",
           "targets": [
             {
               "datasource": {
@@ -6123,7 +5598,7 @@
                 "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
-              "expr": "rate(waku_service_requests_total{service =~\"/vac/waku/store-query/3.*\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval])",
+              "expr": "(rate(waku_service_requests_total{service =~\"/vac/waku/store-query/3.*\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]) or rate(logos_delivery_service_requests_total{service =~\"/vac/waku/store-query/3.*\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]))",
               "legendFormat": "{{instance}} - {{state}}",
               "range": true,
               "refId": "A"
@@ -6142,7 +5617,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 4
+        "y": 76
       },
       "id": 162,
       "panels": [],
@@ -6199,7 +5674,7 @@
             "steps": [
               {
                 "color": "green",
-                "value": null
+                "value": 0
               }
             ]
           },
@@ -6211,7 +5686,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 5
+        "y": 77
       },
       "id": 166,
       "options": {
@@ -6227,7 +5702,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "11.5.2",
+      "pluginVersion": "12.1.0",
       "targets": [
         {
           "datasource": {
@@ -6236,7 +5711,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "sum by(direction, protocol) (total_bytes_exchanged_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
+          "expr": "sum by(direction, protocol) ((total_bytes_exchanged_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_total_bytes_exchanged_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}))",
           "fullMetaSearch": false,
           "includeNullMetadata": false,
           "legendFormat": "__auto",
@@ -6298,7 +5773,7 @@
             "steps": [
               {
                 "color": "green",
-                "value": null
+                "value": 0
               }
             ]
           }
@@ -6309,7 +5784,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 5
+        "y": 77
       },
       "id": 168,
       "options": {
@@ -6325,7 +5800,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "11.5.2",
+      "pluginVersion": "12.1.0",
       "targets": [
         {
           "datasource": {
@@ -6334,7 +5809,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "sum by(direction) (total_transfer_messages_exchanged_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
+          "expr": "sum by(direction) ((total_transfer_messages_exchanged_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_total_transfer_messages_exchanged_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}))",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "legendFormat": "__auto",
@@ -6363,7 +5838,7 @@
             "steps": [
               {
                 "color": "green",
-                "value": null
+                "value": 0
               }
             ]
           }
@@ -6374,7 +5849,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 13
+        "y": 85
       },
       "id": 164,
       "options": {
@@ -6401,7 +5876,7 @@
         "sizing": "auto",
         "valueMode": "hidden"
       },
-      "pluginVersion": "11.5.2",
+      "pluginVersion": "12.1.0",
       "targets": [
         {
           "datasource": {
@@ -6411,7 +5886,7 @@
           "disableTextWrap": false,
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "sum by(le) (reconciliation_roundtrips_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
+          "expr": "sum by(le) ((reconciliation_roundtrips_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_reconciliation_roundtrips_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}))",
           "format": "heatmap",
           "fullMetaSearch": false,
           "hide": false,
@@ -6442,7 +5917,7 @@
             "steps": [
               {
                 "color": "green",
-                "value": null
+                "value": 0
               }
             ]
           }
@@ -6453,7 +5928,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 13
+        "y": 85
       },
       "id": 171,
       "options": {
@@ -6480,12 +5955,12 @@
         "sizing": "auto",
         "valueMode": "hidden"
       },
-      "pluginVersion": "11.5.2",
+      "pluginVersion": "12.1.0",
       "targets": [
         {
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "sum by(le) (reconciliation_differences_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
+          "expr": "sum by(le) ((reconciliation_differences_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_reconciliation_differences_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}))",
           "format": "heatmap",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -6548,7 +6023,7 @@
             "steps": [
               {
                 "color": "green",
-                "value": null
+                "value": 0
               }
             ]
           }
@@ -6559,7 +6034,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 21
+        "y": 93
       },
       "id": 172,
       "options": {
@@ -6575,13 +6050,13 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "11.5.2",
+      "pluginVersion": "12.1.0",
       "targets": [
         {
           "disableTextWrap": false,
           "editorMode": "code",
           "exemplar": false,
-          "expr": "total_messages_cached{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}",
+          "expr": "(total_messages_cached{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_total_messages_cached{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -6601,7 +6076,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 29
+        "y": 101
       },
       "id": 87,
       "panels": [
@@ -6668,7 +6143,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 4386
+            "y": 4479
           },
           "id": 93,
           "options": {
@@ -6695,7 +6170,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "rate(waku_filter_requests_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval])",
+              "expr": "(rate(waku_filter_requests_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]) or rate(logos_delivery_filter_requests_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]))",
               "legendFormat": "{{type}} : {{instance}}",
               "range": true,
               "refId": "A"
@@ -6767,7 +6242,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 4386
+            "y": 4479
           },
           "id": 89,
           "options": {
@@ -6791,7 +6266,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "waku_filter_subscriptions{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}",
+              "expr": "(waku_filter_subscriptions{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_filter_subscriptions{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
               "legendFormat": "{{instance}}",
               "range": true,
               "refId": "A"
@@ -6863,7 +6338,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 4386
+            "y": 4479
           },
           "id": 91,
           "options": {
@@ -6887,7 +6362,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "rate(waku_filter_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval])",
+              "expr": "(rate(waku_filter_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]) or rate(logos_delivery_filter_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]))",
               "legendFormat": "{{type}} : {{instance}}",
               "range": true,
               "refId": "A"
@@ -6920,7 +6395,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 4394
+            "y": 4487
           },
           "id": 95,
           "options": {
@@ -6939,7 +6414,7 @@
               "color": "rgba(255,0,255,0.7)"
             },
             "filterValues": {
-              "le": 1e-9
+              "le": 1e-09
             },
             "legend": {
               "show": false
@@ -6967,7 +6442,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "sum(increase(waku_filter_request_duration_seconds_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval])) by (le)",
+              "expr": "sum((increase(waku_filter_request_duration_seconds_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]) or increase(logos_delivery_filter_request_duration_seconds_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]))) by (le)",
               "format": "heatmap",
               "interval": "",
               "legendFormat": "{{le}}",
@@ -7002,7 +6477,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 4394
+            "y": 4487
           },
           "id": 97,
           "options": {
@@ -7021,7 +6496,7 @@
               "color": "rgba(255,0,255,0.7)"
             },
             "filterValues": {
-              "le": 1e-9
+              "le": 1e-09
             },
             "legend": {
               "show": false
@@ -7049,7 +6524,7 @@
                 "uid": "P6693426190CB2316"
               },
               "editorMode": "code",
-              "expr": "sum(increase(waku_filter_handle_message_duration_seconds_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval])) by (le)",
+              "expr": "sum((increase(waku_filter_handle_message_duration_seconds_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]) or increase(logos_delivery_filter_handle_message_duration_seconds_bucket{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}[$__rate_interval]))) by (le)",
               "format": "heatmap",
               "legendFormat": "{{le}}",
               "range": true,
@@ -7124,7 +6599,7 @@
             "h": 13,
             "w": 12,
             "x": 0,
-            "y": 4402
+            "y": 4495
           },
           "id": 134,
           "options": {
@@ -7153,7 +6628,7 @@
                 "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
-              "expr": "rate(waku_service_requests_total{service = \"/vac/waku/filter-subscribe/2.0.0-beta1\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval])",
+              "expr": "(rate(waku_service_requests_total{service = \"/vac/waku/filter-subscribe/2.0.0-beta1\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]) or rate(logos_delivery_service_requests_total{service = \"/vac/waku/filter-subscribe/2.0.0-beta1\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]))",
               "legendFormat": "{{instance}} - {{state}}",
               "range": true,
               "refId": "A"
@@ -7227,7 +6702,7 @@
             "h": 13,
             "w": 12,
             "x": 12,
-            "y": 4402
+            "y": 4495
           },
           "id": 136,
           "options": {
@@ -7254,7 +6729,7 @@
                 "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
-              "expr": "rate(waku_service_network_bytes_total{service=\"/vac/waku/filter-push/2.0.0-beta1\", direction=\"out\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval])",
+              "expr": "(rate(waku_service_network_bytes_total{service=\"/vac/waku/filter-push/2.0.0-beta1\", direction=\"out\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]) or rate(logos_delivery_service_network_bytes_total{service=\"/vac/waku/filter-push/2.0.0-beta1\", direction=\"out\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]))",
               "legendFormat": "{{instance}}",
               "range": true,
               "refId": "A"
@@ -7273,7 +6748,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 30
+        "y": 102
       },
       "id": 28,
       "panels": [
@@ -7340,7 +6815,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 4461
+            "y": 4554
           },
           "id": 30,
           "options": {
@@ -7364,7 +6839,7 @@
                 "uid": "P6693426190CB2316"
               },
               "exemplar": true,
-              "expr": "waku_lightpush_peers{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}",
+              "expr": "(waku_lightpush_peers{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_lightpush_peers{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
               "interval": "",
               "legendFormat": "{{instance}}",
               "refId": "A"
@@ -7436,7 +6911,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 4461
+            "y": 4554
           },
           "id": 32,
           "options": {
@@ -7460,7 +6935,7 @@
                 "uid": "P6693426190CB2316"
               },
               "exemplar": true,
-              "expr": "waku_lightpush_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"}",
+              "expr": "(waku_lightpush_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"} or logos_delivery_lightpush_errors_total{instance=~\"[[host]].([[dc:pipe]]).*.([[fleet:pipe]])\"})",
               "interval": "",
               "legendFormat": "{{type}}: {[instance}}",
               "refId": "A"
@@ -7534,7 +7009,7 @@
             "h": 12,
             "w": 12,
             "x": 0,
-            "y": 4469
+            "y": 4562
           },
           "id": 138,
           "options": {
@@ -7563,7 +7038,7 @@
                 "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
-              "expr": "rate(waku_service_requests_total{service = \"/vac/waku/lightpush/2.0.0-beta1\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval])",
+              "expr": "(rate(waku_service_requests_total{service = \"/vac/waku/lightpush/2.0.0-beta1\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]) or rate(logos_delivery_service_requests_total{service = \"/vac/waku/lightpush/2.0.0-beta1\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]))",
               "legendFormat": "{{instance}} . {{state}}",
               "range": true,
               "refId": "A"
@@ -7637,7 +7112,7 @@
             "h": 12,
             "w": 12,
             "x": 12,
-            "y": 4469
+            "y": 4562
           },
           "id": 140,
           "options": {
@@ -7664,7 +7139,7 @@
                 "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
-              "expr": "rate(waku_service_network_bytes_total{service=\"/vac/waku/lightpush/2.0.0-beta1\", direction=\"in\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval])",
+              "expr": "(rate(waku_service_network_bytes_total{service=\"/vac/waku/lightpush/2.0.0-beta1\", direction=\"in\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]) or rate(logos_delivery_service_network_bytes_total{service=\"/vac/waku/lightpush/2.0.0-beta1\", direction=\"in\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]))",
               "interval": "",
               "legendFormat": "{{instance}}",
               "range": true,
@@ -7684,7 +7159,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 103
       },
       "id": 151,
       "panels": [
@@ -7753,7 +7228,7 @@
             "h": 12,
             "w": 12,
             "x": 0,
-            "y": 4482
+            "y": 4575
           },
           "id": 153,
           "options": {
@@ -7782,7 +7257,7 @@
                 "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
-              "expr": "rate(waku_service_requests_total{service = \"/vac/waku/peer-exchange/2.0.0-alpha1\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval])",
+              "expr": "(rate(waku_service_requests_total{service = \"/vac/waku/peer-exchange/2.0.0-alpha1\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]) or rate(logos_delivery_service_requests_total{service = \"/vac/waku/peer-exchange/2.0.0-alpha1\", instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]))",
               "legendFormat": "{{instance}} . {{state}}",
               "range": true,
               "refId": "A"
@@ -7856,7 +7331,7 @@
             "h": 12,
             "w": 12,
             "x": 12,
-            "y": 4482
+            "y": 4575
           },
           "id": 154,
           "options": {
@@ -7885,7 +7360,7 @@
                 "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
-              "expr": "rate(waku_px_peers_sent_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval])",
+              "expr": "(rate(waku_px_peers_sent_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]) or rate(logos_delivery_px_peers_sent_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]))",
               "legendFormat": "{{instance}}",
               "range": true,
               "refId": "A"
@@ -7926,7 +7401,7 @@
             "h": 12,
             "w": 12,
             "x": 0,
-            "y": 4494
+            "y": 4587
           },
           "id": 156,
           "options": {
@@ -7961,7 +7436,7 @@
                 "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "builder",
-              "expr": "sum by(instance, type) (waku_px_errors_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"})",
+              "expr": "sum by(instance, type) ((waku_px_errors_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} or logos_delivery_px_errors_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}))",
               "legendFormat": "{{instance}} - {{type}}",
               "range": true,
               "refId": "A"
@@ -8035,7 +7510,7 @@
             "h": 12,
             "w": 12,
             "x": 12,
-            "y": 4494
+            "y": 4587
           },
           "id": 155,
           "options": {
@@ -8064,7 +7539,7 @@
                 "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
-              "expr": "rate(waku_px_errors_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval])",
+              "expr": "(rate(waku_px_errors_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]) or rate(logos_delivery_px_errors_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[$__rate_interval]))",
               "legendFormat": "{{instance}} - {{type}}",
               "range": true,
               "refId": "A"
@@ -8083,7 +7558,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 104
       },
       "id": 15,
       "panels": [
@@ -8151,7 +7626,7 @@
             "h": 7,
             "w": 8,
             "x": 0,
-            "y": 4507
+            "y": 4600
           },
           "id": 13,
           "options": {
@@ -8249,7 +7724,7 @@
             "h": 7,
             "w": 8,
             "x": 8,
-            "y": 4507
+            "y": 4600
           },
           "id": 18,
           "options": {
@@ -8425,7 +7900,7 @@
             "h": 7,
             "w": 8,
             "x": 16,
-            "y": 4507
+            "y": 4600
           },
           "id": 42,
           "options": {
@@ -8518,7 +7993,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 4514
+            "y": 4607
           },
           "id": 103,
           "options": {
@@ -8543,7 +8018,7 @@
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "(increase(waku_node_messages_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[1m]))/60",
+              "expr": "((increase(waku_node_messages_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[1m]) or increase(logos_delivery_node_messages_total{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[1m])))/60",
               "format": "heatmap",
               "instant": false,
               "legendFormat": "{{fleet}}_{{datacenter}}",
@@ -8614,7 +8089,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 4514
+            "y": 4607
           },
           "id": 102,
           "options": {
@@ -8639,7 +8114,7 @@
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "waku_histogram_message_size_sum{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}/waku_histogram_message_size_count{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}",
+              "expr": "(waku_histogram_message_size_sum{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} or logos_delivery_histogram_message_size_sum{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"})/(waku_histogram_message_size_count{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} or logos_delivery_histogram_message_size_count{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"})",
               "format": "heatmap",
               "instant": false,
               "legendFormat": "{{fleet}}_{{datacenter}}",
@@ -8677,7 +8152,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 4522
+            "y": 4615
           },
           "id": 101,
           "options": {
@@ -8713,7 +8188,7 @@
               },
               "editorMode": "builder",
               "exemplar": false,
-              "expr": "rate(waku_histogram_message_size_bucket{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[1h])/scalar(rate(waku_histogram_message_size_count{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[1h]))*100",
+              "expr": "(rate(waku_histogram_message_size_bucket{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[1h]) or rate(logos_delivery_histogram_message_size_bucket{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[1h]))/scalar((rate(waku_histogram_message_size_count{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[1h]) or rate(logos_delivery_histogram_message_size_count{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}[1h])))*100",
               "format": "heatmap",
               "instant": false,
               "legendFormat": "{{le}}",
@@ -8751,7 +8226,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 4530
+            "y": 4623
           },
           "id": 105,
           "options": {
@@ -8784,7 +8259,7 @@
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "waku_connected_peers{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}",
+              "expr": "(waku_connected_peers{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} or logos_delivery_connected_peers{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"})",
               "format": "heatmap",
               "instant": false,
               "legendFormat": "Direction:{{direction}} {{protocol}}",
@@ -8822,7 +8297,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 4530
+            "y": 4623
           },
           "id": 104,
           "options": {
@@ -8855,7 +8330,7 @@
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "waku_streams_peers{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"}",
+              "expr": "(waku_streams_peers{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"} or logos_delivery_streams_peers{instance=~\"[[host]].([[dc:pipe]]).([[fleet:pipe]])\"})",
               "format": "heatmap",
               "instant": false,
               "legendFormat": "Direction:{{direction}} {{protocol}}",
@@ -8876,7 +8351,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 105
       },
       "id": 107,
       "panels": [
@@ -8944,7 +8419,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 4539
+            "y": 4632
           },
           "id": 109,
           "options": {
@@ -8984,7 +8459,7 @@
   ],
   "preload": false,
   "refresh": "30s",
-  "schemaVersion": 40,
+  "schemaVersion": 41,
   "tags": [],
   "templating": {
     "list": [
@@ -9051,21 +8526,24 @@
       {
         "current": {
           "text": "All",
-          "value": "$__all"
+          "value": [
+            "$__all"
+          ]
         },
         "datasource": {
           "type": "prometheus",
           "uid": "P6693426190CB2316"
         },
-        "definition": "label_values(libp2p_peers, datacenter)",
+        "definition": "label_values(libp2p_peers, dc)",
         "includeAll": true,
         "label": "Data Center",
         "multi": true,
         "name": "dc",
         "options": [],
         "query": {
-          "query": "label_values(libp2p_peers, datacenter)",
-          "refId": "StandardVariableQuery"
+          "qryType": 1,
+          "query": "label_values(libp2p_peers, dc)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
         "regex": "",
@@ -9094,6 +8572,5 @@
   "timezone": "browser",
   "title": "Nim-Waku V2",
   "uid": "qrp_ZCTGz",
-  "version": 181,
-  "weekStart": ""
+  "version": 191
 }

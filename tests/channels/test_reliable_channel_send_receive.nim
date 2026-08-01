@@ -71,13 +71,13 @@ suite "Reliable Channel - ingress":
       .createReliableChannel(channelId, contentTopic, SdsParticipantID("local"))
       .expect("createReliableChannel")
 
-    let received = newFuture[seq[byte]]("channel-message-received")
+    let received = newFuture[ChannelMessageReceivedEvent]("channel-message-received")
     discard ChannelMessageReceivedEvent
       .listen(
         brokerCtx,
         proc(evt: ChannelMessageReceivedEvent) {.async: (raises: []).} =
           if not received.finished() and evt.channelId == channelId:
-            received.complete(evt.payload)
+            received.complete(evt)
         ,
       )
       .expect("listen ChannelMessageReceivedEvent")
@@ -108,7 +108,10 @@ suite "Reliable Channel - ingress":
     let arrived = await received.withTimeout(TestTimeout)
     check arrived
     if arrived:
-      check received.read() == appPayload
+      let evt = received.read()
+      check evt.payload == appPayload
+      ## wire sender's id, not the local participant id
+      check evt.senderId == SdsParticipantID("remote")
 
     (await waku.stop()).expect("stop")
 
@@ -160,6 +163,148 @@ suite "Reliable Channel - ingress":
     ## Give the event broker a chance to fan out.
     await sleepAsync(100.milliseconds)
     check not fired
+
+    (await waku.stop()).expect("stop")
+
+  asyncTest "closed channel emits no channel event":
+    ## Issue #4065: no ChannelMessageReceivedEvent after closeChannel.
+    const
+      channelId = ChannelId("test-channel-3")
+      contentTopic = ContentTopic("/reliable-channel/test/proto")
+    let appPayload = "after close".toBytes()
+
+    var waku: LogosDelivery
+    var manager: ReliableChannelManager
+    var brokerCtx: BrokerContext
+    lockNewGlobalBrokerContext:
+      brokerCtx = globalBrokerContext()
+      waku = (await LogosDelivery.new(createApiNodeConf())).expect("LogosDelivery.new")
+      manager = waku.reliableChannelManager
+
+    setNoopEncryption()
+
+    discard manager
+      .createReliableChannel(channelId, contentTopic, SdsParticipantID("local"))
+      .expect("createReliableChannel")
+
+    (await manager.closeChannel(channelId)).expect("closeChannel")
+
+    var fired = false
+    discard ChannelMessageReceivedEvent
+      .listen(
+        brokerCtx,
+        proc(evt: ChannelMessageReceivedEvent) {.async: (raises: []).} =
+          if evt.channelId == channelId:
+            fired = true
+        ,
+      )
+      .expect("listen ChannelMessageReceivedEvent")
+
+    let remotePeer =
+      ReliabilityManager.new(SdsParticipantID("remote"), ReliabilityConfig.init())
+    let sdsWire = (
+      await remotePeer.wrapOutgoingMessage(
+        appPayload, "close-test-msg-1", SdsChannelID(channelId)
+      )
+    ).expect("wrapOutgoingMessage")
+
+    let inboundMsg = WakuMessage(
+      payload: sdsWire,
+      contentTopic: contentTopic,
+      version: 0,
+      meta: LipWireReliableChannelVersion.toBytes(),
+    )
+
+    waku_message_events.MessageReceivedEvent.emit(
+      brokerCtx,
+      waku_message_events.MessageReceivedEvent(messageHash: "", message: inboundMsg),
+    )
+
+    await sleepAsync(100.milliseconds)
+    check not fired
+
+    (await waku.stop()).expect("stop")
+
+  asyncTest "in-flight receive does not emit after close":
+    ## A message already inside the ingress pipeline when closeChannel
+    ## runs must not emit after close returns.
+    const
+      channelId = ChannelId("test-channel-4")
+      contentTopic = ContentTopic("/reliable-channel/test/proto")
+    let appPayload = "in flight".toBytes()
+
+    var waku: LogosDelivery
+    var manager: ReliableChannelManager
+    var brokerCtx: BrokerContext
+    lockNewGlobalBrokerContext:
+      brokerCtx = globalBrokerContext()
+      waku = (await LogosDelivery.new(createApiNodeConf())).expect("LogosDelivery.new")
+      manager = waku.reliableChannelManager
+
+    setNoopEncryption()
+
+    ## Gate decryption so the receive handler parks mid-pipeline.
+    let decryptGate = newFuture[void]("decrypt-gate")
+    Decrypt
+      .replaceProvider(
+        DefaultBrokerContext,
+        proc(payload: seq[byte]): Future[Result[Decrypt, string]] {.async.} =
+          await decryptGate
+          return ok(Decrypt(payload)),
+      )
+      .expect("replaceProvider")
+
+    discard manager
+      .createReliableChannel(channelId, contentTopic, SdsParticipantID("local"))
+      .expect("createReliableChannel")
+
+    var fired = false
+    discard ChannelMessageReceivedEvent
+      .listen(
+        brokerCtx,
+        proc(evt: ChannelMessageReceivedEvent) {.async: (raises: []).} =
+          if evt.channelId == channelId:
+            fired = true
+        ,
+      )
+      .expect("listen ChannelMessageReceivedEvent")
+
+    let remotePeer =
+      ReliabilityManager.new(SdsParticipantID("remote"), ReliabilityConfig.init())
+    let sdsWire = (
+      await remotePeer.wrapOutgoingMessage(
+        appPayload, "inflight-test-msg-1", SdsChannelID(channelId)
+      )
+    ).expect("wrapOutgoingMessage")
+
+    let inboundMsg = WakuMessage(
+      payload: sdsWire,
+      contentTopic: contentTopic,
+      version: 0,
+      meta: LipWireReliableChannelVersion.toBytes(),
+    )
+
+    waku_message_events.MessageReceivedEvent.emit(
+      brokerCtx,
+      waku_message_events.MessageReceivedEvent(messageHash: "", message: inboundMsg),
+    )
+
+    ## Let the handler reach the decrypt await, then close mid-flight.
+    await sleepAsync(50.milliseconds)
+    (await manager.closeChannel(channelId)).expect("closeChannel")
+
+    decryptGate.complete()
+    await sleepAsync(100.milliseconds)
+    check not fired
+
+    ## Restore pass-through decryption for the remaining tests.
+    Decrypt
+      .replaceProvider(
+        DefaultBrokerContext,
+        proc(payload: seq[byte]): Future[Result[Decrypt, string]] {.async.} =
+          return ok(Decrypt(payload)),
+      )
+      .expect("replaceProvider restore")
 
     (await waku.stop()).expect("stop")
 
@@ -1230,5 +1375,49 @@ suite "Reliable Channel - SDS protocol semantics":
 
     check (await manager.send(ChannelId("no-such-channel"), "x".toBytes())).isErr()
     check (await manager.closeChannel(ChannelId("no-such-channel"))).isErr()
+
+    (await waku.stop()).expect("stop")
+
+suite "Reliable Channel - content topic subscription":
+  asyncTest "channels subscribe on create/start and unsubscribe on close":
+    ## Without a subscription `RecvService` drops the channel's inbound traffic.
+    const
+      preStartChannelId = ChannelId("sub-pre-start-channel")
+      preStartTopic = ContentTopic("/reliable-channel/1/sub-pre-start/proto")
+      postStartChannelId = ChannelId("sub-post-start-channel")
+      postStartTopic = ContentTopic("/reliable-channel/1/sub-post-start/proto")
+
+    var waku: LogosDelivery
+    var manager: ReliableChannelManager
+    lockNewGlobalBrokerContext:
+      waku = (await LogosDelivery.new(createApiNodeConf())).expect("LogosDelivery.new")
+      manager = waku.reliableChannelManager
+
+      setNoopEncryption()
+
+      ## Created before start: subscribed by `ReliableChannelManager.start`.
+      discard manager
+        .createReliableChannel(
+          preStartChannelId, preStartTopic, SdsParticipantID("local")
+        )
+        .expect("createReliableChannel pre-start")
+      check not waku.waku.isSubscribed(preStartTopic).expect("isSubscribed")
+
+      (await waku.start()).expect("start")
+      check waku.waku.isSubscribed(preStartTopic).expect("isSubscribed")
+
+      ## Created after start: subscribed immediately.
+      discard manager
+        .createReliableChannel(
+          postStartChannelId, postStartTopic, SdsParticipantID("local")
+        )
+        .expect("createReliableChannel post-start")
+      check waku.waku.isSubscribed(postStartTopic).expect("isSubscribed")
+
+      (await manager.closeChannel(postStartChannelId)).expect("closeChannel post-start")
+      check not waku.waku.isSubscribed(postStartTopic).expect("isSubscribed")
+
+      (await manager.closeChannel(preStartChannelId)).expect("closeChannel pre-start")
+      check not waku.waku.isSubscribed(preStartTopic).expect("isSubscribed")
 
     (await waku.stop()).expect("stop")

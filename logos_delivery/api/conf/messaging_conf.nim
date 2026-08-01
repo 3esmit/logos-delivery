@@ -4,9 +4,9 @@ import results, libp2p/crypto/crypto
 import logos_delivery/api/conf/kernel_conf
 import logos_delivery/waku/common/logging
 import logos_delivery/waku/factory/networks_config
-import logos_delivery/messaging/rate_limit_manager/rate_limit_manager
+import logos_delivery/messaging/rate_limit_manager/rate_limit_config
 
-export kernel_conf, rate_limit_manager
+export kernel_conf, rate_limit_config
 
 # `LogosDeliveryMode` and `EntryLayer` are defined at the leaf (`cli_args`) so
 # they can appear on `WakuNodeConf`; re-exported here via `kernel_conf`.
@@ -45,6 +45,8 @@ type MessagingClientConf* = object
     ## Store retention policy (e.g. "time:3600;size:1GB").
   storeMaxNumDbConnections* {.name: "store-max-num-db-connections".}: Opt[int]
     ## Maximum number of simultaneous store database connections.
+  localStoragePath* {.name: "local-storage-path".}: Opt[string]
+    ## Path to store local data.
   logLevel* {.name: "log-level".}: Opt[logging.LogLevel]
     ## Process log level (TRACE..FATAL); applied by the kernel on node creation.
   logFormat* {.name: "log-format".}: Opt[logging.LogFormat]
@@ -52,9 +54,12 @@ type MessagingClientConf* = object
   nodeKey* {.name: "nodekey".}: Opt[crypto.PrivateKey]
     ## P2P node private key (64-char hex): stable identity / peerId across restarts.
   rateLimit*: Opt[RateLimitConfig]
-    ## Per-epoch message rate limit enforced by the send service. `Opt` like
-    ## every other field so `merge` propagates a caller's override; unset falls
+    ## Per-epoch message rate limit enforced by the send service; unset falls
     ## back to `DefaultRateLimitConfig` (rate limiting disabled).
+    ##
+    ## Settable only programmatically: as a nested object with no `{.name.}`
+    ## pragma or `parseCmdArg`, it is not reachable from the JSON config or a
+    ## CLI flag.
 
 proc applyMode*(conf: var WakuNodeConf, mode: LogosDeliveryMode): ConfResult[void] =
   ## Sets the protocol flags implied by the mode.
@@ -95,6 +100,8 @@ proc toWakuNodeConf*(
     conf.storeMaxNumDbConnections = self.storeMaxNumDbConnections.get()
   if self.storenode.isSome():
     conf.storenode = self.storenode.get()
+  if self.localStoragePath.isSome():
+    conf.localStoragePath = self.localStoragePath.get()
 
   if self.clusterId.isSome():
     conf.clusterId = self.clusterId
@@ -127,7 +134,7 @@ proc toWakuNodeConf*(
   conf.websocketPort = self.websocketPort.get(Port(0))
   conf.quicPort = self.quicPort.get(Port(0))
   conf.websocketSupport = self.websocketSupport.get(false)
-  conf.quicSupport = self.quicSupport.get(true)
+  conf.quicSupport = self.quicSupport.get(false)
 
   return ok(conf)
 
