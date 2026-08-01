@@ -648,7 +648,7 @@ suite "Reliable Channel - SDS persistence":
     ## the latter, then permit a clean restart on the same storage path.
     const
       channelId = ChannelId("sds-stop-order-channel")
-      contentTopic = ContentTopic("/reliable-channel/test/stop-order")
+      contentTopic = ContentTopic("/reliable-channel/1/stop-order/proto")
 
     Persistency.reset()
     let root = getTempDir() / ("reliable_channel_stop_order_" & $epochTime().int)
