@@ -4,6 +4,7 @@ import std/tables
 import results, chronos, chronicles
 
 import logos_delivery/api/types
+import logos_delivery/api/messaging_client_api
 import logos_delivery/channels/reliable_channel_manager
 import logos_delivery/channels/reliable_channel
 import logos_delivery/waku/persistency/sds_persistency
@@ -35,8 +36,18 @@ proc createReliableChannel*(
 ): Result[ChannelId, string] =
   ## Encryption and egress providers must be installed (or `setNoopEncryption()`)
   ## before traffic flows on the channel.
+  ## Subscribes to `contentTopic`; without a `MessagingSubscribe` provider the
+  ## subscription is deferred to `ReliableChannelManager.start`.
   if self.channels.hasKey(channelId):
     return err("channel already exists: " & channelId)
+
+  # Subscribe before constructing so a failure leaks no listeners.
+  if MessagingSubscribe.isProvided(self.brokerCtx):
+    MessagingSubscribe.request(self.brokerCtx, contentTopic).isOkOr:
+      return err("failed to subscribe to content topic: " & error)
+  else:
+    debug "no MessagingSubscribe provider, deferring content topic subscription",
+      channelId = channelId, contentTopic = contentTopic
 
   let cc = self.conf
   let segConfig = SegmentationConfig(
@@ -59,7 +70,8 @@ proc createReliableChannel*(
     segConfig = segConfig,
     sdsConfig = sdsConfig,
     brokerCtx = self.brokerCtx,
-  )
+  ).valueOr:
+    return err("failed to create reliable channel: " & error)
 
   self.channels[channelId] = chn
   return ok(channelId)
@@ -74,10 +86,15 @@ proc closeChannel*(
     self: ReliableChannelManager, channelId: ChannelId
 ): Future[Result[void, string]] {.async: (raises: []).} =
   ## Stops the channel's SDS loops and releases the channel. Persisted SDS
-  ## state survives, so re-creating the channel restores it.
+  ## state survives, so re-creating the channel restores it. The content-topic
+  ## subscription remains in place until an application removes it or the node
+  ## stops: the subscription manager cannot distinguish channel-owned interest
+  ## from an application's own subscription. Owner-aware cleanup is tracked in
+  ## #19.
   let chn = self.channels.getOrDefault(channelId)
   if chn.isNil():
     return err("unknown channel: " & channelId)
   self.channels.del(channelId)
   await chn.stop()
+
   return ok()

@@ -8,6 +8,8 @@
 #include <stdint.h>
 #include <vector>
 #include <iostream>
+#include <type_traits>
+#include <utility>
 
 #include <sys/types.h>
 #include <unistd.h>
@@ -15,6 +17,7 @@
 
 #include "base64.h"
 #include "../../library/liblogosdelivery_kernel.h"
+#include "../../library/ffi_callback.h"
 
 // Shared synchronization variables
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -95,24 +98,80 @@ static void parse_args(int argc, char **argv, struct ConfigNode *cfgNode)
 
 void event_handler(const char *msg, size_t len)
 {
-    printf("Receiving event: %s\n", msg);
+    std::cout << "Receiving event: ";
+    if (msg != nullptr && len != 0)
+    {
+        std::cout.write(msg, static_cast<std::streamsize>(len));
+    }
+    std::cout << std::endl;
 }
 
 void handle_error(const char *msg, size_t len)
 {
-    printf("handle_error: %s\n", msg);
+    std::cerr << "handle_error: ";
+    if (msg != nullptr && len != 0)
+    {
+        std::cerr.write(msg, static_cast<std::streamsize>(len));
+    }
+    std::cerr << std::endl;
     exit(1);
 }
 
 template <class F>
 auto cify(F &&f)
 {
-    static F fn = std::forward<F>(f);
+    using Callback = std::decay_t<F>;
+    static Callback fn = std::forward<F>(f);
     return [](int callerRet, const char *msg, size_t len, void *userData)
     {
+        (void)userData;
+        if (callerRet == RET_STALE_WARN)
+        {
+            return;
+        }
+
+        const char *payload = msg;
+        size_t payload_len = len;
+        if (callerRet == RET_OK &&
+            !logosdelivery_decode_cbor_reply(msg, len, &payload, &payload_len))
+        {
+            std::cerr << "Invalid CBOR request reply" << std::endl;
+            last_callback_ret = RET_ERR;
+            signal_cond();
+            return;
+        }
+
+        if (callerRet != RET_OK && callerRet != RET_ERR)
+        {
+            std::cerr << "Unexpected request callback status: " << callerRet << std::endl;
+            last_callback_ret = callerRet;
+            signal_cond();
+            return;
+        }
+
+        fn(payload, payload_len);
         last_callback_ret = callerRet;
         signal_cond();
-        return fn(msg, len);
+    };
+}
+
+template <class F>
+auto cify_event(F &&f)
+{
+    using Callback = std::decay_t<F>;
+    static Callback fn = std::forward<F>(f);
+    return [](int callerRet, const char *msg, size_t len, void *userData)
+    {
+        (void)userData;
+        if (callerRet == RET_OK)
+        {
+            // Event-listener payloads are raw JSON, not request CBOR replies.
+            fn(msg, len);
+        }
+        else if (callerRet == RET_ERR)
+        {
+            handle_error(msg, len);
+        }
     };
 }
 
@@ -190,14 +249,14 @@ void handle_user_input(void *ctx)
         b64_encode(msg, strlen(msg), msgPayload);
 
         std::string contentTopic;
-        waku_content_topic(ctx,
-                           cify([&contentTopic](const char *msg, size_t len)
-                                { contentTopic = msg; }),
-                           nullptr,
-                           "appName",
-                           1,
-                           "contentTopicName",
-                           "encoding");
+        WAKU_CALL(waku_content_topic(ctx,
+                                     cify([&contentTopic](const char *msg, size_t len)
+                                          { contentTopic.assign(msg, len); }),
+                                     nullptr,
+                                     "appName",
+                                     1,
+                                     "contentTopicName",
+                                     "encoding"));
 
         snprintf(jsonWakuMsg,
                  2048,
@@ -258,7 +317,11 @@ int main(int argc, char **argv)
     void *ctx =
         logosdelivery_create_node(jsonConfig,
                  cify([](const char *msg, size_t len)
-                      { std::cout << "logosdelivery_create_node feedback: " << msg << std::endl; }),
+                      {
+                          std::cout << "logosdelivery_create_node feedback: ";
+                          std::cout.write(msg, static_cast<std::streamsize>(len));
+                          std::cout << std::endl;
+                      }),
                  nullptr);
     waitForCallback();
 
@@ -272,7 +335,11 @@ int main(int argc, char **argv)
         if (ctx != nullptr)
         {
             logosdelivery_destroy(ctx,
-                                  cify([](const char *msg, size_t len) {}),
+                                  cify([](const char *msg, size_t len)
+                                       {
+                                           (void)msg;
+                                           (void)len;
+                                       }),
                                   nullptr);
             waitForCallback();
         }
@@ -285,14 +352,18 @@ int main(int argc, char **argv)
         waku_default_pubsub_topic(
             ctx,
             cify([&defaultPubsubTopic](const char *msg, size_t len)
-                 { defaultPubsubTopic = msg; }),
+                 { defaultPubsubTopic.assign(msg, len); }),
             nullptr));
 
     std::cout << "Default pubsub topic: " << defaultPubsubTopic << std::endl;
 
     WAKU_CALL(waku_version(ctx,
                            cify([&](const char *msg, size_t len)
-                                { std::cout << "Git Version: " << msg << std::endl; }),
+                                {
+                                    std::cout << "Git Version: ";
+                                    std::cout.write(msg, static_cast<std::streamsize>(len));
+                                    std::cout << std::endl;
+                                }),
                            nullptr));
 
     printf("Bind addr: %s:%u\n", cfgNode.host, cfgNode.port);
@@ -301,16 +372,20 @@ int main(int argc, char **argv)
     std::string pubsubTopic;
     WAKU_CALL(waku_pubsub_topic(ctx,
                                 cify([&](const char *msg, size_t len)
-                                     { pubsubTopic = msg; }),
+                                     { pubsubTopic.assign(msg, len); }),
                                 nullptr,
                                 "example"));
 
     std::cout << "Custom pubsub topic: " << pubsubTopic << std::endl;
 
-    logosdelivery_set_event_callback(ctx,
-                       cify([&](const char *msg, size_t len)
-                            { event_handler(msg, len); }),
-                       nullptr);
+    auto onEvent = cify_event([&](const char *msg, size_t len)
+                              { event_handler(msg, len); });
+    for (const char *eventName :
+         {"onMessageSent", "onMessageError", "onMessagePropagated",
+          "onMessageReceived", "onConnectionStatusChange", "onTopicHealthChange",
+          "onConnectionChange", "onReceivedMessage", "onChannelMessageReceived",
+          "onChannelMessageSent", "onChannelMessageError"})
+        logosdelivery_add_event_listener(ctx, eventName, onEvent, nullptr);
 
     WAKU_CALL(logosdelivery_start_node(ctx,
                          cify([&](const char *msg, size_t len)
@@ -326,7 +401,7 @@ int main(int argc, char **argv)
     std::string myPeerId;
     WAKU_CALL(waku_get_my_peerid(ctx,
                                  cify([&myPeerId](const char *msg, size_t len)
-                                      { myPeerId = msg; }),
+                                      { myPeerId.assign(msg, len); }),
                                  nullptr));
 
     std::cout << "My peer id: " << myPeerId << std::endl;

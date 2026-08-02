@@ -7,3 +7,8 @@ edition = "2021"
 
 [build-dependencies]
 cc = "1.0.52"
+
+[[bin]]
+name = "waku-rust-simple-example"
+path = "src/main.rs"
+test = false

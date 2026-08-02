@@ -7,6 +7,7 @@
 ## so the messaging layer never inspects `waku.node` directly.
 {.push raises: [].}
 
+import std/[times, strutils]
 import results, chronos
 
 import logos_delivery/waku/waku
@@ -38,9 +39,53 @@ proc hasLightpush*(self: Waku): bool =
 
 proc relayPushHandler*(self: Waku): PushMessageHandler =
   ## Builds the relay publish handler used by the send pipeline. Caller
-  ## ensures relay is mounted. RLN proof generation is handled client-side
-  ## in (legacy)lightpushPublish; this handler only validates and republishes.
+  ## ensures relay is mounted. The handler validates and republishes; the
+  ## proof is attached by the messaging layer via `attachRlnProof`.
   return getRelayPushHandler(self.node.wakuRelay)
+
+proc attachRlnProof*(
+    self: Waku, message: WakuMessage
+): Future[Result[WakuMessage, string]] {.async.} =
+  ## A proof-bearing message is returned unchanged so an ordinary delivery
+  ## retry reuses its nonce. Without RLN mounted the message passes through.
+  if self.node.rln.isNil() or message.proof.len > 0:
+    return ok(message)
+
+  var msgWithProof = message
+  msgWithProof.proof = (
+    await self.node.rln.generateRLNProofWithRootRefresh(
+      message.toRLNSignal(), float64(getTime().toUnix())
+    )
+  ).valueOr:
+    return err("failed to attach RLN proof: " & error)
+
+  return ok(msgWithProof)
+
+func isStaleRlnProof*(error: ErrorStatus): bool =
+  ## Only a normalized lightpush refresh marker proves retrying can regenerate
+  ## a stale proof. Relay's raw validator marker also covers malformed proofs,
+  ## timestamps, and replays, so it must remain a terminal delivery failure.
+  return
+    error.code == LightPushErrorCode.OUT_OF_RLN_PROOF and
+    error.desc.get("").contains(RlnProofRefreshScheduledMsg)
+
+proc onRlnProofRejected*(self: Waku) =
+  ## Start a non-blocking path refresh; the send-service loop owns retrying.
+  if self.node.rln.isNil():
+    return
+
+  self.node.rln.groupManager.scheduleMerkleProofRefresh()
+
+proc currentRlnEpochQuota*(self: Waku): Opt[tuple[epochIndex, messageLimit: uint64]] =
+  ## RLN's current epoch index and user message limit, read together so the
+  ## pair cannot straddle an epoch boundary.
+  if self.node.rln.isNil():
+    return Opt.none(tuple[epochIndex, messageLimit: uint64])
+
+  let limit = self.node.rln.groupManager.userMessageLimit.valueOr:
+    return Opt.none(tuple[epochIndex, messageLimit: uint64])
+
+  return Opt.some((fromEpoch(self.node.rln.getCurrentEpoch()), uint64(limit)))
 
 proc lightpushPeerAvailable*(self: Waku, shard: PubsubTopic): bool =
   ## True if a lightpush service peer is available for `shard`.
@@ -50,9 +95,9 @@ proc lightpushPublishToAny*(
     self: Waku, shard: PubsubTopic, message: WakuMessage
 ): Future[WakuLightPushResult] {.async.} =
   ## Selects a lightpush service peer for `shard` and publishes `message`
-  ## through the node's lightpush flow, which attaches an RLN proof per
-  ## attempt when RLN is mounted. Returns SERVICE_NOT_AVAILABLE when no peer
-  ## is available.
+  ## through the node's lightpush flow. The send service normally supplies the
+  ## proof, while the node preserves that proof unchanged. Returns
+  ## SERVICE_NOT_AVAILABLE when no peer is available.
   let peer = self.node.peerManager.selectPeer(WakuLightPushCodec, Opt.some(shard)).valueOr:
     return lightpushResultServiceUnavailable("no lightpush peer available for shard")
   try:

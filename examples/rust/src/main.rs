@@ -1,53 +1,46 @@
-use std::cell::OnceCell;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_void};
-use std::{slice, thread, time};
+use std::{thread, time};
 
-pub type FFICallBack = unsafe extern "C" fn(c_int, *const c_char, usize, *const c_void);
+use waku_rust_simple_example::{FFICallback, RequestWaiter, RET_OK};
 
 extern "C" {
-    pub fn logosdelivery_create_node(
-        config_json: *const u8,
-        cb: FFICallBack,
+    fn logosdelivery_create_node(
+        config_json: *const c_char,
+        callback: FFICallback,
         user_data: *const c_void,
     ) -> *mut c_void;
 
-    pub fn waku_version(ctx: *const c_void, cb: FFICallBack, user_data: *const c_void) -> c_int;
+    fn waku_version(ctx: *mut c_void, callback: FFICallback, user_data: *const c_void) -> c_int;
 
-    pub fn logosdelivery_start_node(ctx: *const c_void, cb: FFICallBack, user_data: *const c_void) -> c_int;
-
-    pub fn waku_default_pubsub_topic(
+    fn logosdelivery_start_node(
         ctx: *mut c_void,
-        cb: FFICallBack,
+        callback: FFICallback,
         user_data: *const c_void,
-    ) -> *mut c_void;
+    ) -> c_int;
+
+    fn waku_default_pubsub_topic(
+        ctx: *mut c_void,
+        callback: FFICallback,
+        user_data: *const c_void,
+    ) -> c_int;
 }
 
-pub unsafe extern "C" fn trampoline<C>(
-    return_val: c_int,
-    buffer: *const c_char,
-    buffer_len: usize,
-    data: *const c_void,
-) where
-    C: FnMut(i32, &str),
-{
-    let closure = &mut *(data as *mut C);
+const REQUEST_TIMEOUT: time::Duration = time::Duration::from_secs(30);
 
-    let buffer_utf8 =
-        String::from_utf8(slice::from_raw_parts(buffer as *mut u8, buffer_len).to_vec())
-            .expect("valid utf8");
-
-    closure(return_val, &buffer_utf8);
+fn wait_for_request(
+    request: impl FnOnce(FFICallback, *const c_void) -> c_int,
+) -> Result<Vec<u8>, String> {
+    let waiter = RequestWaiter::new();
+    let status = request(waiter.callback(), waiter.user_data());
+    if status != RET_OK && !waiter.terminal_callback_received() {
+        // ffiRaw returns a non-OK direct status before queuing a callback.
+        return unsafe { waiter.abort_before_callback(status) };
+    }
+    waiter.wait(REQUEST_TIMEOUT)
 }
 
-pub fn get_trampoline<C>(_closure: &C) -> FFICallBack
-where
-    C: FnMut(i32, &str),
-{
-    trampoline::<C>
-}
-
-fn main() {
+fn run() -> Result<(), String> {
     let config_json = "\
     { \
         \"mode\": \"Core\",\
@@ -55,59 +48,51 @@ fn main() {
             \"listen-address\": \"127.0.0.1\",\
             \"tcp-port\": 60000, \
             \"nodekey\": \"0d714a1fada214dead6dc9c7274581ec20ff292451866e7d6d677dc818e8ccd2\", \
-            \"log-level\": \"DEBUG\"
-        }
+            \"log-level\": \"DEBUG\"\
+        }\
     }";
+    let config_json = CString::new(config_json)
+        .map_err(|_| "node configuration contains an interior NUL byte".to_owned())?;
 
-    unsafe {
-        // Create the waku node
-        let closure = |ret: i32, data: &str| {
-            println!("Ret {ret}. logosdelivery_create_node closure called {data}");
-        };
-        let cb = get_trampoline(&closure);
-        let config_json_str = CString::new(config_json).unwrap();
-        let ctx = logosdelivery_create_node(
-            config_json_str.as_ptr() as *const u8,
-            cb,
-            &closure as *const _ as *const c_void,
-        );
-
-        // Extracting the current waku version
-        let version: OnceCell<String> = OnceCell::new();
-        let closure = |ret: i32, data: &str| {
-            println!("version_closure. Ret: {ret}. Data: {data}");
-            let _ = version.set(data.to_string());
-        };
-        let cb = get_trampoline(&closure);
-        let _ret = waku_version(
-            &ctx as *const _ as *const c_void,
-            cb,
-            &closure as *const _ as *const c_void,
-        );
-
-        // Extracting the default pubsub topic
-        let default_pubsub_topic: OnceCell<String> = OnceCell::new();
-        let closure = |_ret: i32, data: &str| {
-            let _ = default_pubsub_topic.set(data.to_string());
-        };
-        let cb = get_trampoline(&closure);
-        let _ret = waku_default_pubsub_topic(ctx, cb, &closure as *const _ as *const c_void);
-
-        println!("Version: {}", version.get_or_init(|| unreachable!()));
-        println!(
-            "Default pubsubTopic: {}",
-            default_pubsub_topic.get_or_init(|| unreachable!())
-        );
-
-        // Start the Waku node
-        let closure = |ret: i32, data: &str| {
-            println!("Ret {ret}. logosdelivery_start_node closure called {data}");
-        };
-        let cb = get_trampoline(&closure);
-        let _ret = logosdelivery_start_node(ctx, cb, &closure as *const _ as *const c_void);
+    let create_waiter = RequestWaiter::new();
+    let config_json = create_waiter.retain_c_string(config_json);
+    let ctx = unsafe {
+        logosdelivery_create_node(
+            config_json,
+            create_waiter.callback(),
+            create_waiter.user_data(),
+        )
+    };
+    create_waiter.wait(REQUEST_TIMEOUT)?;
+    if ctx.is_null() {
+        return Err("node creation completed without a context".to_owned());
     }
 
+    let version =
+        wait_for_request(|callback, user_data| unsafe { waku_version(ctx, callback, user_data) })?;
+    println!("Version: {}", String::from_utf8_lossy(&version));
+
+    let default_pubsub_topic = wait_for_request(|callback, user_data| unsafe {
+        waku_default_pubsub_topic(ctx, callback, user_data)
+    })?;
+    println!(
+        "Default pubsubTopic: {}",
+        String::from_utf8_lossy(&default_pubsub_topic)
+    );
+
+    wait_for_request(|callback, user_data| unsafe {
+        logosdelivery_start_node(ctx, callback, user_data)
+    })?;
+    println!("Node started");
+
     loop {
-        thread::sleep(time::Duration::from_millis(10000));
+        thread::sleep(time::Duration::from_secs(10));
+    }
+}
+
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("logos-delivery example failed: {error}");
+        std::process::exit(1);
     }
 }

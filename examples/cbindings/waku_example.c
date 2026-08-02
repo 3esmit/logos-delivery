@@ -13,6 +13,7 @@
 
 #include "base64.h"
 #include "../../library/liblogosdelivery_kernel.h"
+#include "../../library/ffi_callback.h"
 
 // Shared synchronization variables
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -97,16 +98,62 @@ void signal_cond()
   pthread_mutex_unlock(&mutex);
 }
 
+static int decode_request_payload(int callerRet,
+                                  const char *msg,
+                                  size_t len,
+                                  const char **payload,
+                                  size_t *payload_len)
+{
+  if (callerRet != RET_OK)
+  {
+    *payload = msg;
+    *payload_len = len;
+    return 1;
+  }
+
+  return logosdelivery_decode_cbor_reply(msg, len, payload, payload_len);
+}
+
+static void print_payload(const char *prefix, const char *payload, size_t payload_len)
+{
+  fputs(prefix, stdout);
+  if (payload != NULL && payload_len != 0)
+  {
+    fwrite(payload, 1, payload_len, stdout);
+  }
+  fputc('\n', stdout);
+}
+
+static void report_invalid_reply(void)
+{
+  fputs("Invalid CBOR request reply\n", stderr);
+}
+
 void event_handler(int callerRet, const char *msg, size_t len, void *userData)
 {
+  (void)userData;
+  if (callerRet == RET_STALE_WARN)
+  {
+    return;
+  }
+
+  const char *payload = NULL;
+  size_t payload_len = 0;
+  if (!decode_request_payload(callerRet, msg, len, &payload, &payload_len))
+  {
+    report_invalid_reply();
+    signal_cond();
+    return;
+  }
+
   if (callerRet == RET_ERR)
   {
-    printf("Error: %s\n", msg);
+    print_payload("Error: ", payload, payload_len);
     exit(1);
   }
   else if (callerRet == RET_OK)
   {
-    printf("Receiving event: %s\n", msg);
+    print_payload("Receiving response: ", payload, payload_len);
   }
 
   signal_cond();
@@ -114,42 +161,97 @@ void event_handler(int callerRet, const char *msg, size_t len, void *userData)
 
 void on_event_received(int callerRet, const char *msg, size_t len, void *userData)
 {
+  (void)userData;
   if (callerRet == RET_ERR)
   {
-    printf("Error: %s\n", msg);
+    print_payload("Error: ", msg, len);
     exit(1);
   }
   else if (callerRet == RET_OK)
   {
-    printf("Receiving event: %s\n", msg);
+    // Event-listener payloads are raw JSON, not request CBOR replies.
+    print_payload("Receiving event: ", msg, len);
   }
 }
 
 char *contentTopic = NULL;
 void handle_content_topic(int callerRet, const char *msg, size_t len, void *userData)
 {
+  (void)userData;
+  if (callerRet == RET_STALE_WARN)
+  {
+    return;
+  }
+
+  const char *payload = NULL;
+  size_t payload_len = 0;
+  if (callerRet != RET_OK ||
+      !decode_request_payload(callerRet, msg, len, &payload, &payload_len))
+  {
+    if (callerRet == RET_OK)
+    {
+      report_invalid_reply();
+    }
+    else
+    {
+      print_payload("Error: ", msg, len);
+    }
+    exit(1);
+  }
+
   if (contentTopic != NULL)
   {
     free(contentTopic);
   }
 
-  contentTopic = malloc(len * sizeof(char) + 1);
-  strcpy(contentTopic, msg);
+  contentTopic = malloc(payload_len + 1);
+  if (contentTopic == NULL)
+  {
+    fputs("Unable to allocate content topic\n", stderr);
+    exit(1);
+  }
+  memcpy(contentTopic, payload, payload_len);
+  contentTopic[payload_len] = '\0';
   signal_cond();
 }
 
 char *publishResponse = NULL;
 void handle_publish_ok(int callerRet, const char *msg, size_t len, void *userData)
 {
-  printf("Publish Ok: %s %lu\n", msg, len);
+  (void)userData;
+  if (callerRet == RET_STALE_WARN)
+  {
+    return;
+  }
+
+  const char *payload = NULL;
+  size_t payload_len = 0;
+  if (!decode_request_payload(callerRet, msg, len, &payload, &payload_len))
+  {
+    report_invalid_reply();
+    return;
+  }
+  if (callerRet != RET_OK)
+  {
+    print_payload("Error: ", payload, payload_len);
+    return;
+  }
+
+  print_payload("Publish Ok: ", payload, payload_len);
 
   if (publishResponse != NULL)
   {
     free(publishResponse);
   }
 
-  publishResponse = malloc(len * sizeof(char) + 1);
-  strcpy(publishResponse, msg);
+  publishResponse = malloc(payload_len + 1);
+  if (publishResponse == NULL)
+  {
+    fputs("Unable to allocate publish response\n", stderr);
+    return;
+  }
+  memcpy(publishResponse, payload, payload_len);
+  publishResponse[payload_len] = '\0';
 }
 
 #define MAX_MSG_SIZE 65535
@@ -157,7 +259,7 @@ void handle_publish_ok(int callerRet, const char *msg, size_t len, void *userDat
 void publish_message(const char *msg)
 {
   char jsonWakuMsg[MAX_MSG_SIZE];
-  char *msgPayload = b64_encode(msg, strlen(msg));
+  char *msgPayload = b64_encode((const unsigned char *)msg, strlen(msg));
 
   WAKU_CALL(waku_content_topic(ctx,
                                handle_content_topic,
@@ -189,13 +291,51 @@ void show_help_and_exit()
 
 void print_default_pubsub_topic(int callerRet, const char *msg, size_t len, void *userData)
 {
-  printf("Default pubsub topic: %s\n", msg);
+  (void)userData;
+  if (callerRet == RET_STALE_WARN)
+  {
+    return;
+  }
+
+  const char *payload = NULL;
+  size_t payload_len = 0;
+  if (!decode_request_payload(callerRet, msg, len, &payload, &payload_len))
+  {
+    report_invalid_reply();
+  }
+  else if (callerRet == RET_OK)
+  {
+    print_payload("Default pubsub topic: ", payload, payload_len);
+  }
+  else
+  {
+    print_payload("Error: ", payload, payload_len);
+  }
   signal_cond();
 }
 
 void print_waku_version(int callerRet, const char *msg, size_t len, void *userData)
 {
-  printf("Git Version: %s\n", msg);
+  (void)userData;
+  if (callerRet == RET_STALE_WARN)
+  {
+    return;
+  }
+
+  const char *payload = NULL;
+  size_t payload_len = 0;
+  if (!decode_request_payload(callerRet, msg, len, &payload, &payload_len))
+  {
+    report_invalid_reply();
+  }
+  else if (callerRet == RET_OK)
+  {
+    print_payload("Git Version: ", payload, payload_len);
+  }
+  else
+  {
+    print_payload("Error: ", payload, payload_len);
+  }
   signal_cond();
 }
 
@@ -312,7 +452,15 @@ int main(int argc, char **argv)
   printf("Bind addr: %s:%u\n", cfgNode.host, cfgNode.port);
   printf("Waku Relay enabled: %s\n", cfgNode.relay == 1 ? "YES" : "NO");
 
-  logosdelivery_set_event_callback(ctx, on_event_received, userData);
+  static const char *kEventNames[] = {
+      "onMessageSent",            "onMessageError",
+      "onMessagePropagated",      "onMessageReceived",
+      "onConnectionStatusChange", "onTopicHealthChange",
+      "onConnectionChange",       "onReceivedMessage",
+      "onChannelMessageReceived", "onChannelMessageSent",
+      "onChannelMessageError"};
+  for (size_t i = 0; i < sizeof(kEventNames) / sizeof(kEventNames[0]); i++)
+    logosdelivery_add_event_listener(ctx, kEventNames[i], on_event_received, userData);
 
   logosdelivery_start_node(ctx, event_handler, userData);
   waitForCallback();

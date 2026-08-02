@@ -60,12 +60,10 @@ proc toRLNSignal*(wakumessage: WakuMessage): seq[byte] =
     output = concat(wakumessage.payload, contentTopicBytes, @(timestampBytes))
   return output
 
-proc generateRLNProof*(
-    rln: Rln, input: seq[byte], senderEpochTime: float64
+proc generateRLNProofWithNonce(
+    rln: Rln, input: seq[byte], senderEpochTime: float64, nonce: Nonce
 ): Future[Result[seq[byte], string]] {.async: (raises: []).} =
   let epoch = rln.calcEpoch(senderEpochTime)
-  let nonce = rln.nonceManager.getNonce().valueOr:
-    return err("could not get new message id to generate an rln proof: " & $error)
   try:
     let proof = (await rln.groupManager.generateProof(input, epoch, nonce)).valueOr:
       return err("could not generate rln-v2 proof: " & $error)
@@ -73,13 +71,23 @@ proc generateRLNProof*(
   except CatchableError as e:
     return err("exception generating rln proof: " & e.msg)
 
+proc generateRLNProof*(
+    rln: Rln, input: seq[byte], senderEpochTime: float64
+): Future[Result[seq[byte], string]] {.async: (raises: []).} =
+  let nonce = rln.nonceManager.getNonce().valueOr:
+    return err("could not get new message id to generate an rln proof: " & $error)
+  return await rln.generateRLNProofWithNonce(input, senderEpochTime, nonce)
+
 proc generateRLNProofWithRootRefresh*(
     rln: Rln, input: seq[byte], senderEpochTime: float64
 ): Future[Result[seq[byte], string]] {.async.} =
   ## Generates an RLN proof and checks its merkle root against the
   ## acceptable-root window. If the root is stale, invalidates the cache and
   ## regenerates once against a refetched path. Returns the proof bytes.
-  let proofBytes = (await rln.generateRLNProof(input, senderEpochTime)).valueOr:
+  let nonce = rln.nonceManager.getNonce().valueOr:
+    return err("could not get new message id to generate an rln proof: " & $error)
+
+  let proofBytes = (await rln.generateRLNProofWithNonce(input, senderEpochTime, nonce)).valueOr:
     return err("failed to generate RLN proof: " & $error)
 
   let rlnProof = RateLimitProof.init(proofBytes).valueOr:
@@ -90,7 +98,7 @@ proc generateRLNProofWithRootRefresh*(
 
   info "RLN: stale merkle root detected; refreshing merkle path and regenerating proof"
   rln.groupManager.invalidateMerkleProofCache()
-  return await rln.generateRLNProof(input, senderEpochTime)
+  return await rln.generateRLNProofWithNonce(input, senderEpochTime, nonce)
 
 proc attachRLNProof*(
     r: Rln, message: WakuMessage

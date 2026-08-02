@@ -157,18 +157,41 @@ Note: The `payload` field should be base64-encoded.
 
 ### Events
 
-#### `logosdelivery_set_event_callback`
-Sets a callback that will be invoked whenever an event occurs (e.g., message received).
+Events are delivered through a per-event listener registry: register one callback
+per event name you care about. A registration returns a listener id you can later
+pass to remove it.
+
+#### `logosdelivery_add_event_listener`
+Registers `callback` for the named event and returns a non-zero listener id (0 on
+an invalid context).
 
 ```c
-void logosdelivery_set_event_callback(
+uint64_t logosdelivery_add_event_listener(
     void *ctx,
+    const char *eventName,
     FFICallBack callback,
     void *userData
 );
 ```
 
-**Important:** The callback should be fast, non-blocking, and thread-safe.
+Event names: `onMessageSent`, `onMessageError`, `onMessagePropagated`,
+`onMessageReceived`, `onConnectionStatusChange`, `onTopicHealthChange`,
+`onConnectionChange`, `onReceivedMessage`, `onChannelMessageReceived`,
+`onChannelMessageSent`, `onChannelMessageError`.
+
+#### `logosdelivery_remove_event_listener`
+Removes a previously registered listener. Returns `0` on success, `1` if the
+listener id was not found or the context is invalid.
+
+```c
+int logosdelivery_remove_event_listener(
+    void *ctx,
+    uint64_t listenerId
+);
+```
+
+**Important:** Callbacks run on a dedicated event thread and should be fast,
+non-blocking, and thread-safe.
 
 ## Building
 
@@ -189,6 +212,10 @@ All functions that return `int` use the following return codes:
 - `RET_OK` (0): Success
 - `RET_ERR` (1): Error
 - `RET_MISSING_CALLBACK` (2): Missing callback function
+- `RET_STALE_WARN` (3): Request still in progress. This callback-only status is
+  non-terminal and may be emitted repeatedly before one terminal `RET_OK` or
+  `RET_ERR`; do not wake a waiter, resolve a promise, or otherwise complete the
+  request for this status.
 
 ## Callback Function
 
@@ -209,17 +236,51 @@ typedef void (*FFICallBack)(
 - `len`: Length of the message
 - `userData`: User data passed in the original call
 
+### Request callback payloads
+
+For request callbacks, a non-empty terminal `RET_OK` payload is a
+length-delimited CBOR text string. Decode it before treating it as JSON, text,
+or an identifier, and use `len` rather than C-string operations on the callback
+buffer. A zero-length `RET_OK` payload is valid. `RET_ERR` payloads and
+`RET_STALE_WARN` progress payloads are raw UTF-8 text.
+
+The convenience helper in `ffi_callback.h` decodes one definite-length CBOR
+text or byte string without allocating. Its result points into the callback
+buffer, so copy it before the callback returns if it must outlive that call.
+
+Event-listener callbacks are different: their `RET_OK` payloads are raw event
+JSON, not CBOR request replies. See [MESSAGE_EVENTS.md](MESSAGE_EVENTS.md).
+
 ## Example Usage
 
 ```c
 #include "liblogosdelivery.h"
+#include "ffi_callback.h"
 #include <stdio.h>
 
 void callback(int ret, const char *msg, size_t len, void *userData) {
+    if (ret == RET_STALE_WARN) {
+        return; // Progress only: keep waiting for RET_OK or RET_ERR.
+    }
+
     if (ret == RET_OK) {
-        printf("Success: %.*s\n", (int)len, msg);
+        const char *payload;
+        size_t payload_len;
+        if (!logosdelivery_decode_cbor_reply(msg, len, &payload, &payload_len)) {
+            fprintf(stderr, "Invalid CBOR request reply\n");
+            return;
+        }
+        fputs("Success: ", stdout);
+        if (payload_len != 0) {
+            fwrite(payload, 1, payload_len, stdout);
+        }
+        fputc('\n', stdout);
     } else {
-        printf("Error: %.*s\n", (int)len, msg);
+        fputs("Error: ", stdout);
+        if (len != 0) {
+            fwrite(msg, 1, len, stdout);
+        }
+        fputc('\n', stdout);
     }
 }
 

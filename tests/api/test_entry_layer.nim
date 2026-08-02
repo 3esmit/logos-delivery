@@ -5,6 +5,7 @@ import chronos, testutils/unittests, presto, presto/client as presto_client
 import brokers/broker_context
 import logos_delivery
 import
+  logos_delivery/api/[types, messaging_client_api],
   logos_delivery/api/conf/logos_delivery_conf,
   logos_delivery/messaging/rest_api/client as messaging_rest_client,
   logos_delivery/waku/rest_api/endpoint/[client, server]
@@ -80,6 +81,35 @@ suite "LogosDelivery - entry layer selection":
       node.ensureChannels().isOk()
     (await node.stop()).isOkOr:
       raiseAssert "stop failed: " & error
+
+  asyncTest "channels: failed deferred subscription rolls back lower layers":
+    ## Creating a channel before the messaging provider exists defers its
+    ## subscription. If that subscription is invalid when startup reaches the
+    ## channel manager, `LogosDelivery.start` must unwind the already-started
+    ## Waku and messaging layers before it reports the original failure.
+    lockNewGlobalBrokerContext:
+      let node = (await LogosDelivery.new(nodeConf(EntryLayer.channels))).valueOr:
+        raiseAssert error
+      let brokerCtx = node.waku.brokerCtx
+      discard node.reliableChannelManager
+        .createReliableChannel(
+          ChannelId("deferred-subscription-rollback"),
+          ContentTopic("invalidContentTopic"),
+          SdsParticipantID("local"),
+        )
+        .expect("create deferred reliable channel")
+
+      let startResult = await node.start()
+      check:
+        startResult.isErr()
+        startResult.error.contains("failed to start ReliableChannelManager")
+        not node.waku.node.started
+        not node.messagingClient.started
+        not MessagingSend.isProvided(brokerCtx)
+        not MessagingSubscribe.isProvided(brokerCtx)
+        not MessagingUnsubscribe.isProvided(brokerCtx)
+
+      await node.reliableChannelManager.stop()
 
   asyncTest "messaging + rest: messaging REST endpoints are installed and working":
     ## entry-layer=messaging, mode=Core, rest=true -> `start` mounts the messaging

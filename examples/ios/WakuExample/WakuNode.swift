@@ -48,40 +48,86 @@ struct TimestampedError: Identifiable, Equatable {
 
 // MARK: - Callback Context for C API
 
+private typealias CallbackResult = (success: Bool, result: String?)
+
 private final class CallbackContext: @unchecked Sendable {
     private let lock = NSLock()
-    private var _continuation: CheckedContinuation<(success: Bool, result: String?), Never>?
-    private var _resumed = false
-    var success: Bool = false
-    var result: String?
+    private var continuation: CheckedContinuation<CallbackResult, Never>?
+    private var terminalResult: CallbackResult?
+    private var timeoutResult: CallbackResult?
+    private var resultDelivered = false
 
-    var continuation: CheckedContinuation<(success: Bool, result: String?), Never>? {
-        get {
+    func waitForResult() async -> CallbackResult {
+        await withCheckedContinuation { continuation in
+            let completedResult: CallbackResult?
+
             lock.lock()
-            defer { lock.unlock() }
-            return _continuation
-        }
-        set {
-            lock.lock()
-            defer { lock.unlock() }
-            _continuation = newValue
+            if let timeout = timeoutResult {
+                resultDelivered = true
+                completedResult = timeout
+            } else if let terminal = terminalResult {
+                resultDelivered = true
+                completedResult = terminal
+            } else {
+                self.continuation = continuation
+                completedResult = nil
+            }
+            lock.unlock()
+
+            if let completed = completedResult {
+                continuation.resume(returning: completed)
+            }
         }
     }
 
-    /// Thread-safe resume - ensures continuation is only resumed once
-    /// Returns true if this call actually resumed, false if already resumed
-    @discardableResult
-    func resumeOnce(returning value: (success: Bool, result: String?)) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
+    /// Delivers the single terminal request callback. The retained opaque
+    /// pointer is consumed by that callback, never by the timeout path.
+    func completeTerminal(with result: CallbackResult) {
+        let continuation: CheckedContinuation<CallbackResult, Never>?
 
-        guard !_resumed, let cont = _continuation else {
+        lock.lock()
+        guard terminalResult == nil else {
+            lock.unlock()
+            return
+        }
+
+        terminalResult = result
+        if !resultDelivered, let waitingContinuation = self.continuation {
+            resultDelivered = true
+            self.continuation = nil
+            continuation = waitingContinuation
+        } else {
+            continuation = nil
+        }
+        lock.unlock()
+
+        continuation?.resume(returning: result)
+    }
+
+    /// Resumes the Swift caller without releasing the opaque C callback
+    /// context. A delayed terminal callback still owns and safely releases it.
+    @discardableResult
+    func timeout() -> Bool {
+        let continuation: CheckedContinuation<CallbackResult, Never>?
+        let timeoutResult: CallbackResult = (false, "Timeout")
+
+        lock.lock()
+        guard !resultDelivered, terminalResult == nil else {
+            lock.unlock()
             return false
         }
 
-        _resumed = true
-        _continuation = nil
-        cont.resume(returning: value)
+        self.timeoutResult = timeoutResult
+        if let waitingContinuation = self.continuation {
+            resultDelivered = true
+            self.continuation = nil
+            continuation = waitingContinuation
+        } else {
+            continuation = nil
+        }
+        lock.unlock()
+
+        continuation?.resume(returning: timeoutResult)
         return true
     }
 }
@@ -126,21 +172,74 @@ actor WakuActor {
     // Using a simple static reference (safe because we only have one instance)
     private static var sharedEventContinuation: AsyncStream<String>.Continuation?
 
-    private static let eventCallback: WakuCallBack = { ret, msg, len, userData in
-        guard ret == RET_OK, let msg = msg else { return }
-        let str = String(cString: msg)
+    private static func rawCallbackMessage(_ message: UnsafePointer<CChar>?, length: Int) -> String? {
+        guard length > 0, let message = message else { return nil }
+        let bytes = UnsafeBufferPointer(start: message, count: length).map { UInt8(bitPattern: $0) }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
+    private static func decodeCborRequestReply(_ message: UnsafePointer<CChar>?, length: Int) -> Data? {
+        guard length >= 0 else { return nil }
+        guard length > 0 else { return Data() }
+        guard let message = message else { return nil }
+
+        let bytes = UnsafeBufferPointer(start: message, count: length).map { UInt8(bitPattern: $0) }
+        guard let initial = bytes.first, initial >> 5 == 2 || initial >> 5 == 3 else {
+            return nil
+        }
+
+        let headerLength: Int
+        let decodedLength: UInt64
+        switch initial & 0x1f {
+        case 0...23:
+            headerLength = 1
+            decodedLength = UInt64(initial & 0x1f)
+        case 24:
+            guard length >= 2 else { return nil }
+            headerLength = 2
+            decodedLength = UInt64(bytes[1])
+        case 25:
+            guard length >= 3 else { return nil }
+            headerLength = 3
+            decodedLength = (UInt64(bytes[1]) << 8) | UInt64(bytes[2])
+        case 26:
+            guard length >= 5 else { return nil }
+            headerLength = 5
+            decodedLength = (UInt64(bytes[1]) << 24) | (UInt64(bytes[2]) << 16) |
+                (UInt64(bytes[3]) << 8) | UInt64(bytes[4])
+        case 27:
+            guard length >= 9 else { return nil }
+            headerLength = 9
+            decodedLength = bytes[1...8].reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+        default:
+            return nil
+        }
+
+        guard decodedLength == UInt64(length - headerLength) else { return nil }
+        return Data(bytes[headerLength...])
+    }
+
+    private static let eventCallback: FFICallBack = { ret, msg, len, userData in
+        guard ret == RET_OK,
+              let str = WakuActor.rawCallbackMessage(msg, length: Int(len)) else { return }
         WakuActor.sharedEventContinuation?.yield(str)
     }
 
-    private static let syncCallback: WakuCallBack = { ret, msg, len, userData in
+    private static let syncCallback: FFICallBack = { ret, msg, len, userData in
+        guard ret != RET_STALE_WARN else { return }
         guard let userData = userData else { return }
-        let context = Unmanaged<CallbackContext>.fromOpaque(userData).takeUnretainedValue()
-        let success = (ret == RET_OK)
-        var resultStr: String? = nil
-        if let msg = msg {
-            resultStr = String(cString: msg)
+        let context = Unmanaged<CallbackContext>.fromOpaque(userData).takeRetainedValue()
+
+        if ret == RET_OK {
+            guard WakuActor.decodeCborRequestReply(msg, length: Int(len)) != nil else {
+                context.completeTerminal(with: (false, "Invalid CBOR request reply"))
+                return
+            }
+            context.completeTerminal(with: (true, nil))
+            return
         }
-        context.resumeOnce(returning: (success, resultStr))
+
+        context.completeTerminal(with: (false, WakuActor.rawCallbackMessage(msg, length: Int(len))))
     }
 
     // MARK: - Stream Setup
@@ -314,38 +413,33 @@ actor WakuActor {
         }
         """
 
-        // Create node - logosdelivery_create_node is special, it returns the context directly
-        let createResult = await withCheckedContinuation { (continuation: CheckedContinuation<(ctx: UnsafeMutableRawPointer?, success: Bool, result: String?), Never>) in
-            let callbackCtx = CallbackContext()
-            let userDataPtr = Unmanaged.passRetained(callbackCtx).toOpaque()
+        // Node creation returns its context immediately but reports completion
+        // through the same terminal callback contract as other requests.
+        let createResult = await createNode(config)
 
-            // Set up a simple callback for logosdelivery_create_node
-            let newCtx = logosdelivery_create_node(config, { ret, msg, len, userData in
-                guard let userData = userData else { return }
-                let context = Unmanaged<CallbackContext>.fromOpaque(userData).takeUnretainedValue()
-                context.success = (ret == RET_OK)
-                if let msg = msg {
-                    context.result = String(cString: msg)
+        guard createResult.success, let createdContext = createResult.ctx else {
+            if let failedContext = createResult.ctx {
+                _ = await callWakuSync { userData in
+                    logosdelivery_destroy(failedContext, WakuActor.syncCallback, userData)
                 }
-            }, userDataPtr)
-
-            // Small delay to ensure callback completes
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) {
-                Unmanaged<CallbackContext>.fromOpaque(userDataPtr).release()
-                continuation.resume(returning: (newCtx, callbackCtx.success, callbackCtx.result))
             }
-        }
-
-        guard createResult.ctx != nil else {
             statusContinuation?.yield(.statusChanged(.error))
             statusContinuation?.yield(.error("Failed to create node: \(createResult.result ?? "unknown")"))
             return false
         }
 
-        ctx = createResult.ctx
+        ctx = createdContext
 
-        // Set event callback
-        logosdelivery_set_event_callback(ctx, WakuActor.eventCallback, nil)
+        // Register per-event listeners
+        let eventNames = [
+            "onMessageSent", "onMessageError", "onMessagePropagated",
+            "onMessageReceived", "onConnectionStatusChange", "onTopicHealthChange",
+            "onConnectionChange", "onReceivedMessage", "onChannelMessageReceived",
+            "onChannelMessageSent", "onChannelMessageError",
+        ]
+        for name in eventNames {
+            _ = logosdelivery_add_event_listener(ctx, name, WakuActor.eventCallback, nil)
+        }
 
         // Start node
         let startResult = await callWakuSync { userData in
@@ -563,24 +657,34 @@ actor WakuActor {
 
     // MARK: - Helper for synchronous C calls
 
-    private func callWakuSync(_ work: @escaping (UnsafeMutableRawPointer) -> Void) async -> (success: Bool, result: String?) {
-        await withCheckedContinuation { continuation in
-            let context = CallbackContext()
-            context.continuation = continuation
-            let userDataPtr = Unmanaged.passRetained(context).toOpaque()
+    private func createNode(_ config: String) async -> (ctx: UnsafeMutableRawPointer?, success: Bool, result: String?) {
+        let callbackContext = CallbackContext()
+        // The terminal callback balances this retain, including after a late callback.
+        let userData = Unmanaged.passRetained(callbackContext).toOpaque()
+        let nodeContext = logosdelivery_create_node(config, WakuActor.syncCallback, userData)
+        let result = await callbackContext.waitForResult()
 
-            work(userDataPtr)
+        return (nodeContext, result.success, result.result)
+    }
 
-            // Set a timeout to avoid hanging forever
-            DispatchQueue.global().asyncAfter(deadline: .now() + 15) {
-                // Try to resume with timeout - will be ignored if callback already resumed
-                let didTimeout = context.resumeOnce(returning: (false, "Timeout"))
-                if didTimeout {
-                    print("[WakuActor] Call timed out")
-                }
-                Unmanaged<CallbackContext>.fromOpaque(userDataPtr).release()
+    private func scheduleTimeout(for callbackContext: CallbackContext) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + 15) { [weak callbackContext] in
+            guard let context = callbackContext else { return }
+            if context.timeout() {
+                print("[WakuActor] Call timed out")
             }
         }
+    }
+
+    private func callWakuSync(_ work: @escaping (UnsafeMutableRawPointer) -> Void) async -> (success: Bool, result: String?) {
+        let callbackContext = CallbackContext()
+        // The terminal callback balances this retain; timeout only resumes Swift.
+        let userData = Unmanaged.passRetained(callbackContext).toOpaque()
+
+        scheduleTimeout(for: callbackContext)
+
+        work(userData)
+        return await callbackContext.waitForResult()
     }
 }
 
