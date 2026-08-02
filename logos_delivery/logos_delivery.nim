@@ -200,7 +200,17 @@ proc start*(self: LogosDelivery): Future[Result[void, string]] {.async.} =
 
   if not self.reliableChannelManager.isNil():
     self.reliableChannelManager.start().isOkOr:
-      return err("failed to start ReliableChannelManager: " & error)
+      let managerStartError = error
+      if not self.messagingClient.isNil():
+        await self.messagingClient.stop()
+      (await self.waku.stop()).isOkOr:
+        error "failed to roll back Waku after ReliableChannelManager start failure",
+          error = error
+        return err(
+          "failed to start ReliableChannelManager: " & managerStartError &
+            "; failed to roll back Waku: " & error
+        )
+      return err("failed to start ReliableChannelManager: " & managerStartError)
 
   return ok()
 
