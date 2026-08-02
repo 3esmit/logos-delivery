@@ -1,4 +1,5 @@
 #include "../liblogosdelivery.h"
+#include "../ffi_callback.h"
 #include "json_utils.h"
 #include <stdio.h>
 #include <string.h>
@@ -14,6 +15,7 @@ static volatile int got_message_received = 0;
 
 // Event callback that handles message events
 void event_callback(int ret, const char *msg, size_t len, void *userData) {
+    (void)userData;
     if (ret != RET_OK || msg == NULL || len == 0) {
         return;
     }
@@ -110,19 +112,40 @@ void event_callback(int ret, const char *msg, size_t len, void *userData) {
 // Simple callback that prints results
 void simple_callback(int ret, const char *msg, size_t len, void *userData) {
     const char *operation = (const char *)userData;
+    const char *label = operation != NULL ? operation : "callback";
+
+    if (ret == RET_STALE_WARN) {
+        return;
+    }
 
     if (operation != NULL && strcmp(operation, "create_node") == 0) {
         create_node_ok = (ret == RET_OK) ? 1 : 0;
     }
 
     if (ret == RET_OK) {
-        if (len > 0) {
-            printf("[%s] Success: %.*s\n", operation, (int)len, msg);
-        } else {
-            printf("[%s] Success\n", operation);
+        const char *payload = NULL;
+        size_t payload_len = 0;
+        if (!logosdelivery_decode_cbor_reply(msg, len, &payload, &payload_len)) {
+            fprintf(stderr, "[%s] Invalid CBOR request reply\n", label);
+            if (operation != NULL && strcmp(operation, "create_node") == 0) {
+                create_node_ok = 0;
+            }
+            return;
         }
+
+        printf("[%s] Success", label);
+        if (payload != NULL && payload_len > 0) {
+            printf(": ");
+            fwrite(payload, 1, payload_len, stdout);
+        }
+        printf("\n");
     } else {
-        printf("[%s] Error: %.*s\n", operation, (int)len, msg);
+        printf("[%s] Error", label);
+        if (msg != NULL && len > 0) {
+            printf(": ");
+            fwrite(msg, 1, len, stdout);
+        }
+        printf("\n");
     }
 }
 

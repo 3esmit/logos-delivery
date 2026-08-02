@@ -12,6 +12,10 @@
 #define RET_OK 0
 #define RET_ERR 1
 #define RET_MISSING_CALLBACK 2
+// Callback-only progress notification. A request that has not reached a
+// terminal result may emit this status repeatedly; do not treat it as success,
+// failure, or completion.
+#define RET_STALE_WARN 3
 
 #ifdef __cplusplus
 extern "C"
@@ -19,6 +23,17 @@ extern "C"
 #endif
 
   typedef void (*FFICallBack)(int callerRet, const char *msg, size_t len, void *userData);
+
+  // Callback response contract:
+  //
+  // * A request callback reaches one terminal RET_OK or RET_ERR. RET_STALE_WARN
+  //   is an in-flight progress notification, not a terminal result.
+  // * A non-empty RET_OK request reply is a length-delimited CBOR text string.
+  //   Decode it before interpreting the payload; use `len`, never C string
+  //   operations on the callback buffer. Empty RET_OK replies are valid.
+  // * RET_ERR payloads are raw UTF-8 error text. RET_STALE_WARN payloads are
+  //   raw progress text.
+  // * Event-listener payloads are raw JSON and are not CBOR request replies.
 
   // Creates a new instance of the node from the given configuration JSON.
   // Returns a pointer to the Context needed by the rest of the API functions.

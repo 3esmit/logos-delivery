@@ -427,7 +427,8 @@ docker-liteprotocoltester-push:
 ################
 ## C Bindings ##
 ################
-.PHONY: cbindings cwaku_example liblogosdelivery liblogosdelivery_example
+.PHONY: cbindings cwaku_example cppwaku_example ffi_callback_contract_test \
+	liblogosdelivery liblogosdelivery_example
 
 detected_OS ?= Linux
 ifeq ($(OS),Windows_NT)
@@ -504,6 +505,13 @@ cppwaku_example: | build liblogosdelivery
 		./examples/cpp/base64.cpp \
 		-llogosdelivery -Lbuild/ \
 		-pthread -ldl -lm
+
+ffi_callback_contract_test: | build
+	echo -e $(BUILD_MSG) "build/$@" && \
+		cc -std=c11 -Wall -Wextra -Werror \
+			-o "build/$@" \
+			./tests/cbindings/test_callback_contract.c && \
+		"build/$@"
 
 nodejswaku: | build deps
 	echo -e $(BUILD_MSG) "build/$@" && \
