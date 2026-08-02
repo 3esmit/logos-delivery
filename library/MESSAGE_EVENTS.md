@@ -4,6 +4,10 @@
 
 The liblogosdelivery library emits three types of message delivery events that clients can listen to by registering a per-event callback with `logosdelivery_add_event_listener()`. The events are delivered under the wire names `onMessageSent`, `onMessagePropagated` and `onMessageError` (the JSON `eventType` inside each payload is `message_sent` / `message_propagated` / `message_error`).
 
+Event-listener `RET_OK` payloads are raw JSON, not CBOR request replies. The
+`RET_STALE_WARN` progress status applies only to request callbacks, not event
+delivery.
+
 ## Event Types
 
 ### 1. message_sent
