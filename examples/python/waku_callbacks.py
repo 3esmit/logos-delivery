@@ -102,6 +102,10 @@ class TerminalRequest:
             raise RuntimeError("%s failed: %s" % (self._operation, self._error))
         return self._payload
 
+    def has_terminal_callback(self):
+        with self._lock:
+            return self._terminal
+
     def abandon_before_dispatch(self):
         """Release a request only when its FFI call was never dispatched."""
         with self._lock:
@@ -113,8 +117,16 @@ def call_and_wait(operation, dispatch, timeout_seconds=30):
     """Dispatch an asynchronous FFI request and wait for its terminal result."""
     request = TerminalRequest(operation)
     try:
-        dispatch(request.callback)
+        status = dispatch(request.callback)
     except BaseException:
         request.abandon_before_dispatch()
         raise
+    if status not in (None, RET_OK):
+        if request.has_terminal_callback():
+            return request.wait(0)
+        request.abandon_before_dispatch()
+        raise RuntimeError(
+            "%s was rejected before callback dispatch (status %s)"
+            % (operation, status)
+        )
     return request.wait(timeout_seconds)

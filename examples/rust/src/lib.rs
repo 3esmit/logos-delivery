@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 pub type FFICallback = unsafe extern "C" fn(c_int, *const c_char, usize, *const c_void);
 
-const RET_OK: c_int = 0;
+pub const RET_OK: c_int = 0;
 const RET_ERR: c_int = 1;
 const RET_STALE_WARN: c_int = 3;
 
@@ -44,10 +44,10 @@ impl RequestState {
     }
 
     fn complete(&self, reply: RequestReply) {
-        let mut terminal_reply = self
-            .terminal_reply
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut terminal_reply = match self.terminal_reply.lock() {
+            Ok(reply) => reply,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         if terminal_reply.is_none() {
             *terminal_reply = Some(reply);
             self.terminal_callback.notify_all();
@@ -56,10 +56,10 @@ impl RequestState {
 
     fn wait_for_terminal(&self, timeout: Duration) -> Option<RequestReply> {
         let deadline = Instant::now().checked_add(timeout)?;
-        let mut terminal_reply = self
-            .terminal_reply
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut terminal_reply = match self.terminal_reply.lock() {
+            Ok(reply) => reply,
+            Err(poisoned) => poisoned.into_inner(),
+        };
 
         loop {
             if terminal_reply.is_some() {
@@ -67,10 +67,13 @@ impl RequestState {
             }
 
             let remaining = deadline.checked_duration_since(Instant::now())?;
-            let (new_reply, wait_result) = self
+            let (new_reply, wait_result) = match self
                 .terminal_callback
                 .wait_timeout(terminal_reply, remaining)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            {
+                Ok(result) => result,
+                Err(poisoned) => poisoned.into_inner(),
+            };
             terminal_reply = new_reply;
 
             if wait_result.timed_out() && terminal_reply.is_none() {
@@ -117,11 +120,10 @@ impl RequestWaiter {
     /// work. The string is retained even if `wait` times out, because the FFI
     /// still owns the callback state at that point.
     pub fn retain_c_string(&self, value: CString) -> *const c_char {
-        let mut retained_c_strings = self
-            .state
-            .retained_c_strings
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut retained_c_strings = match self.state.retained_c_strings.lock() {
+            Ok(strings) => strings,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         retained_c_strings.push(value);
         match retained_c_strings.last() {
             Some(value) => value.as_ptr(),
@@ -137,6 +139,30 @@ impl RequestWaiter {
                     .to_owned()
             })?
             .into_result()
+    }
+
+    /// Releases the FFI-owned callback reference after a direct dispatch
+    /// failure. The `ffiRaw` ABI returns a non-OK status before queuing a
+    /// callback, so no native callback can consume this reference.
+    ///
+    /// # Safety
+    ///
+    /// Call only after an FFI API's documented direct-return failure path has
+    /// proved that no callback can arrive for `user_data`.
+    pub unsafe fn abort_before_callback(self, status: c_int) -> Result<Vec<u8>, String> {
+        unsafe {
+            drop(Arc::from_raw(self.user_data.cast::<RequestState>()));
+        }
+        Err(format!(
+            "request was rejected before callback dispatch (status {status})"
+        ))
+    }
+
+    pub fn terminal_callback_received(&self) -> bool {
+        match self.state.terminal_reply.lock() {
+            Ok(reply) => reply.is_some(),
+            Err(poisoned) => poisoned.into_inner().is_some(),
+        }
     }
 }
 
@@ -317,6 +343,38 @@ mod tests {
             state.wait_for_terminal(Duration::ZERO),
             Some(RequestReply::Ok(b"ok".to_vec()))
         );
+    }
+
+    #[test]
+    fn direct_dispatch_failure_reclaims_the_ffi_owned_state() {
+        let waiter = RequestWaiter::new();
+        let state = Arc::clone(&waiter.state);
+
+        assert!(matches!(
+            unsafe { waiter.abort_before_callback(RET_ERR) },
+            Err(error) if error.contains("rejected before callback dispatch")
+        ));
+        assert_eq!(Arc::strong_count(&state), 1);
+    }
+
+    #[test]
+    fn direct_dispatch_error_preserves_synchronous_callback_detail() {
+        let waiter = RequestWaiter::new();
+        let user_data = waiter.user_data();
+
+        unsafe {
+            request_callback(
+                RET_ERR,
+                b"node failed".as_ptr().cast(),
+                b"node failed".len(),
+                user_data,
+            );
+        }
+
+        assert!(matches!(
+            waiter.wait(Duration::ZERO),
+            Err(error) if error.contains("node failed")
+        ));
     }
 
     #[test]

@@ -6,6 +6,7 @@ from waku_callbacks import (
     RET_STALE_WARN,
     TerminalRequest,
     _PENDING_REQUESTS,
+    call_and_wait,
 )
 
 
@@ -48,6 +49,26 @@ class TerminalRequestTest(unittest.TestCase):
         invoke(request, RET_OK)
         self.assertEqual(request.wait(0), b"")
         self.assertNotIn(request, _PENDING_REQUESTS)
+
+    def test_direct_dispatch_error_releases_callback_state(self):
+        with self.assertRaisesRegex(RuntimeError, "rejected before callback dispatch"):
+            call_and_wait("start", lambda _callback: 1, timeout_seconds=0)
+        self.assertFalse(_PENDING_REQUESTS)
+
+    def test_direct_dispatch_error_preserves_synchronous_callback_detail(self):
+        def dispatch(callback):
+            payload = ctypes.create_string_buffer(b"node failed")
+            callback(
+                1,
+                ctypes.cast(payload, ctypes.POINTER(ctypes.c_char)),
+                len(b"node failed"),
+                None,
+            )
+            return 1
+
+        with self.assertRaisesRegex(RuntimeError, "node failed"):
+            call_and_wait("start", dispatch, timeout_seconds=0)
+        self.assertFalse(_PENDING_REQUESTS)
 
 
 if __name__ == "__main__":
