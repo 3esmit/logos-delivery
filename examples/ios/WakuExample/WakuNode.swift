@@ -104,12 +104,6 @@ private final class CallbackContext: @unchecked Sendable {
         continuation?.resume(returning: result)
     }
 
-    var receivedTerminalCallback: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return terminalResult != nil
-    }
-
     /// Resumes the Swift caller without releasing the opaque C callback
     /// context. A delayed terminal callback still owns and safely releases it.
     @discardableResult
@@ -424,7 +418,7 @@ actor WakuActor {
         let createResult = await createNode(config)
 
         guard createResult.success, let createdContext = createResult.ctx else {
-            if createResult.terminal, let failedContext = createResult.ctx {
+            if let failedContext = createResult.ctx {
                 _ = await callWakuSync { userData in
                     logosdelivery_destroy(failedContext, WakuActor.syncCallback, userData)
                 }
@@ -663,20 +657,14 @@ actor WakuActor {
 
     // MARK: - Helper for synchronous C calls
 
-    private func createNode(_ config: String) async -> (
-        ctx: UnsafeMutableRawPointer?,
-        success: Bool,
-        result: String?,
-        terminal: Bool
-    ) {
+    private func createNode(_ config: String) async -> (ctx: UnsafeMutableRawPointer?, success: Bool, result: String?) {
         let callbackContext = CallbackContext()
         // The terminal callback balances this retain, including after a late callback.
         let userData = Unmanaged.passRetained(callbackContext).toOpaque()
-        scheduleTimeout(for: callbackContext)
         let nodeContext = logosdelivery_create_node(config, WakuActor.syncCallback, userData)
         let result = await callbackContext.waitForResult()
 
-        return (nodeContext, result.success, result.result, callbackContext.receivedTerminalCallback)
+        return (nodeContext, result.success, result.result)
     }
 
     private func scheduleTimeout(for callbackContext: CallbackContext) {
