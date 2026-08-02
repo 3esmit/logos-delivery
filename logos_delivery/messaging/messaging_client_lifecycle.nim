@@ -17,27 +17,33 @@ export messaging_client
 proc start*(self: MessagingClient): Result[void, string] =
   if self.started:
     return ok()
-  self.recvService.startRecvService()
-  self.sendService.startSendService()
 
-  ?MessagingSend.setProvider(
+  MessagingSend.setProvider(
     self.brokerCtx,
     proc(envelope: MessageEnvelope): Future[Result[RequestId, string]] {.async.} =
       return await self.send(envelope),
-  )
+  ).isOkOr:
+    return err(error)
 
-  ?MessagingSubscribe.setProvider(
+  MessagingSubscribe.setProvider(
     self.brokerCtx,
     proc(contentTopic: ContentTopic): Result[void, string] =
       self.waku.subscribe(contentTopic),
-  )
+  ).isOkOr:
+    MessagingSend.clearProvider(self.brokerCtx)
+    return err(error)
 
-  ?MessagingUnsubscribe.setProvider(
+  MessagingUnsubscribe.setProvider(
     self.brokerCtx,
     proc(contentTopic: ContentTopic): Result[void, string] =
       self.waku.unsubscribe(contentTopic),
-  )
+  ).isOkOr:
+    MessagingSubscribe.clearProvider(self.brokerCtx)
+    MessagingSend.clearProvider(self.brokerCtx)
+    return err(error)
 
+  self.recvService.startRecvService()
+  self.sendService.startSendService()
   self.started = true
   ok()
 

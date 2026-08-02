@@ -61,10 +61,7 @@ proc start*(self: ReliableChannelManager): Result[void, string] =
   if MessagingSubscribe.isProvided(self.brokerCtx):
     for chn in self.channels.values:
       MessagingSubscribe.request(self.brokerCtx, chn.getContentTopic()).isOkOr:
-        warn "failed to subscribe channel's content topic",
-          channelId = chn.getChannelId(),
-          contentTopic = chn.getContentTopic(),
-          error = error
+        return err("failed to subscribe channel's content topic: " & error)
   ok()
 
 proc stop*(self: ReliableChannelManager) {.async.} =

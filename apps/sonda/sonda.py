@@ -48,7 +48,6 @@ parser.add_argument('-p', '--pubsub-topic',      type=str, default='/waku/2/rs/1
 parser.add_argument('-d', '--delay-seconds',     type=int, default=60,                  help='Delay in seconds between messages.')
 parser.add_argument('-n', '--store-nodes',       type=str, required=True,               help='Comma separated list of store nodes to query.')
 parser.add_argument('-t', '--health-threshold',  type=int, default=5,                   help='Consecutive successful store requests to consider a store node healthy.')
-args = parser.parse_args()
 
 
 # Logs message including current UTC time
@@ -197,6 +196,14 @@ def send_store_query(rest_address, store_node, encoded_pubsub_topic, encoded_con
         record_store_failure(store_node, ERR_STORE_BACKEND_ERROR, response.text)
         return False
 
+    # The local REST endpoint reports an expired store query as HTTP 500 with
+    # this stable response body. The request reached the selected store peer,
+    # so classify it as a peer query timeout rather than a local unknown error.
+    if (response.status_code == 500 and
+            'No history response received (timeout)' in response.text):
+        record_store_failure(store_node, ERR_QUERY_TIMEOUT, response.text)
+        return False
+
     if response.status_code != 200:
         record_store_failure(store_node, ERR_UNKNOWN,
                              f'HTTP {response.status_code} {response.text}', blame_peer=False)
@@ -227,6 +234,7 @@ def send_store_queries(rest_address, store_nodes, pubsub_topic, content_topic, t
 
 
 def main():
+  args = parser.parse_args()
   log_with_utc(f'Running Sonda with args={args}')
 
   store_nodes = []
@@ -258,4 +266,5 @@ def main():
         node_health.labels(node=store_node).set(0)
 
 
-main()
+if __name__ == '__main__':
+  main()

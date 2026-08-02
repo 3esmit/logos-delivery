@@ -52,6 +52,8 @@ proc admit*(
 ): Future[Result[void, RateLimitError]] {.async: (raises: []).} =
   ## Charges one message against the current epoch's limit, rolling the window
   ## first when the epoch has advanced. A disabled config admits everything.
+  discard msg
+
   if not self.config.enabled:
     return ok()
 

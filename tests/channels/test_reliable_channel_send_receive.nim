@@ -1379,7 +1379,7 @@ suite "Reliable Channel - SDS protocol semantics":
     (await waku.stop()).expect("stop")
 
 suite "Reliable Channel - content topic subscription":
-  asyncTest "channels subscribe on create/start and unsubscribe on close":
+  asyncTest "channels subscribe on create/start and preserve topics on close":
     ## Without a subscription `RecvService` drops the channel's inbound traffic.
     const
       preStartChannelId = ChannelId("sub-pre-start-channel")
@@ -1415,9 +1415,15 @@ suite "Reliable Channel - content topic subscription":
       check waku.waku.isSubscribed(postStartTopic).expect("isSubscribed")
 
       (await manager.closeChannel(postStartChannelId)).expect("closeChannel post-start")
+      ## The messaging subscription can also belong to application traffic, so
+      ## channel close must not remove it without owner-aware accounting.
+      check waku.waku.isSubscribed(postStartTopic).expect("isSubscribed")
+      waku.messagingClient.unsubscribe(postStartTopic).expect("unsubscribe post-start")
       check not waku.waku.isSubscribed(postStartTopic).expect("isSubscribed")
 
       (await manager.closeChannel(preStartChannelId)).expect("closeChannel pre-start")
+      check waku.waku.isSubscribed(preStartTopic).expect("isSubscribed")
+      waku.messagingClient.unsubscribe(preStartTopic).expect("unsubscribe pre-start")
       check not waku.waku.isSubscribed(preStartTopic).expect("isSubscribed")
 
     (await waku.stop()).expect("stop")

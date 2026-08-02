@@ -85,24 +85,15 @@ proc closeChannel*(
     self: ReliableChannelManager, channelId: ChannelId
 ): Future[Result[void, string]] {.async: (raises: []).} =
   ## Stops the channel's SDS loops and releases the channel. Persisted SDS
-  ## state survives, so re-creating the channel restores it. Unsubscribes the
-  ## content topic unless another open channel still uses it.
+  ## state survives, so re-creating the channel restores it. The content-topic
+  ## subscription remains in place until an application removes it or the node
+  ## stops: the subscription manager cannot distinguish channel-owned interest
+  ## from an application's own subscription. Owner-aware cleanup is tracked in
+  ## #19.
   let chn = self.channels.getOrDefault(channelId)
   if chn.isNil():
     return err("unknown channel: " & channelId)
   self.channels.del(channelId)
   await chn.stop()
-
-  # After `stop` so in-flight sends cannot auto-resubscribe; best-effort.
-  let contentTopic = chn.getContentTopic()
-  var topicStillUsed = false
-  for other in self.channels.values:
-    if other.getContentTopic() == contentTopic:
-      topicStillUsed = true
-      break
-  if not topicStillUsed and MessagingUnsubscribe.isProvided(self.brokerCtx):
-    MessagingUnsubscribe.request(self.brokerCtx, contentTopic).isOkOr:
-      warn "failed to unsubscribe closed channel's content topic",
-        channelId = channelId, contentTopic = contentTopic, error = error
 
   return ok()

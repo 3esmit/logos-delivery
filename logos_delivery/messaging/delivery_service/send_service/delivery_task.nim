@@ -31,6 +31,11 @@ type DeliveryTask* = ref object
     ## waiting for epoch budget. Guards re-admission on retry and anchors the
     ## delivery-timeout reaper, so a task parked for budget is not aged out
     ## before it can be sent.
+  rateLimitParked*: bool
+    ## Set only after the rate limiter denies a transmission. The first later
+    ## admission refreshes the timestamp-bound message identity before a proof
+    ## is generated, so a message cannot outlive the RLN clock window while it
+    ## waits for epoch capacity.
   propagateEventEmitted*: bool
   errorDesc*: string
 
@@ -105,6 +110,26 @@ proc isDeliveryTimedOut*(self: DeliveryTask, maxTime: timer.Duration): bool =
   return
     self.firstAdmittedTime.isSome() and self.firstPropagatedTime.isNone() and
     self.admissionAge() > maxTime
+
+proc refreshAfterRateLimitPark*(self: DeliveryTask) =
+  ## A budget-parked task may have waited longer than the peers' accepted clock
+  ## gap. Its timestamp is part of both the RLN signal and message hash, while
+  ## the proof is not part of the hash and must be regenerated for the refreshed
+  ## signal.
+  if not self.rateLimitParked:
+    return
+
+  self.msg.timestamp = getNanosecondTime(getTime().toUnixFloat())
+  self.msg.proof = @[]
+  self.msgHash = computeMessageHash(self.pubsubTopic, self.msg)
+  self.rateLimitParked = false
+
+proc retryWithFreshRlnProof*(self: DeliveryTask) =
+  ## An RLN validator rejected the attached proof. Clear only that proof and
+  ## let the next round regenerate it. The task retains its original rate-limit
+  ## admission: a stale proof did not represent a new application message.
+  ## Ordinary transient retries do not call this helper and retain their proof.
+  self.msg.proof = @[]
 
 proc isEphemeral*(self: DeliveryTask): bool =
   return self.msg.ephemeral

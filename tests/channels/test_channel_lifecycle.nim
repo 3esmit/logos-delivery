@@ -39,12 +39,13 @@ suite "Reliable Channel - lifecycle":
 
       check not manager.channelExists(channelId)
 
-  asyncTest "create subscribes the content topic, close unsubscribes it":
-    ## Close unsubscribes only when no other open channel shares the topic.
+  asyncTest "close preserves an application's content topic subscription":
+    ## The subscription manager does not distinguish application-owned and
+    ## channel-owned interest, so closing a channel must not remove an
+    ## application's pre-existing subscription.
     const
       topic = ContentTopic("/reliable-channel/test/subscribe/proto")
-      chnA = ChannelId("subscribe-channel-a")
-      chnB = ChannelId("subscribe-channel-b")
+      channelId = ChannelId("subscribe-channel")
 
     var subscribed: seq[ContentTopic]
     var unsubscribed: seq[ContentTopic]
@@ -73,18 +74,13 @@ suite "Reliable Channel - lifecycle":
         )
         .expect("setProvider MessagingUnsubscribe")
 
-      discard manager.createReliableChannel(chnA, topic, SdsParticipantID("a")).expect(
-          "createReliableChannel a"
-        )
-      check subscribed == @[topic]
+      MessagingSubscribe.request(brokerCtx, topic).expect("application subscribe")
 
-      discard manager.createReliableChannel(chnB, topic, SdsParticipantID("b")).expect(
-          "createReliableChannel b"
-        )
+      discard manager
+        .createReliableChannel(channelId, topic, SdsParticipantID("local"))
+        .expect("createReliableChannel")
 
-      ## chnB still uses the topic: closing chnA must not unsubscribe.
-      (await manager.closeChannel(chnA)).expect("closeChannel a")
+      check subscribed == @[topic, topic]
+
+      (await manager.closeChannel(channelId)).expect("closeChannel")
       check unsubscribed.len == 0
-
-      (await manager.closeChannel(chnB)).expect("closeChannel b")
-      check unsubscribed == @[topic]

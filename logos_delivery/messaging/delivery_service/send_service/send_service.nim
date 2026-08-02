@@ -32,6 +32,11 @@ const MaxTimeInCache* = chronos.minutes(1)
   ## Messages older than this time will get completely forgotten on publication and a
   ## feedback will be given when that happens
 
+const MaxPendingRateLimitedTasks* = 128
+  ## Bounds memory used by tasks waiting for a future epoch admission.
+
+const RateLimitQueueFullError = "rate limit queue is full"
+
 const ServiceLoopInterval* = chronos.seconds(1)
   ## Interval at which we check that messages have been properly received by a store node
 
@@ -52,6 +57,7 @@ type SendService* = ref object of RootObj
     ## are free.
 
   waku: Waku
+  maxPendingRateLimitedTasks: int
   checkStoreForMessages: bool
   lastStoreCheckTime: Moment ## throttles store validation queries to ArchiveTime cadence
 
@@ -68,7 +74,9 @@ proc setupSendProcessorChain(
 
   if isRelayAvail:
     let publishProc = waku.relayPushHandler()
-    processors.add(RelaySendProcessor.new(isLightPushAvail, publishProc, brokerCtx))
+    processors.add(
+      RelaySendProcessor.new(isLightPushAvail, publishProc, waku, brokerCtx)
+    )
   if isLightPushAvail:
     processors.add(LightpushSendProcessor.new(waku, brokerCtx))
 
@@ -86,6 +94,7 @@ proc new*(
     waku: Waku,
     rateLimitManager: RateLimitManager,
     sendProcessor: BaseSendProcessor = nil,
+    maxPendingRateLimitedTasks: int = MaxPendingRateLimitedTasks,
 ): Result[T, string] =
   ## `sendProcessor` overrides the relay/lightpush chain built from `waku`,
   ## letting a caller drive the scheduler against a scripted delivery outcome.
@@ -110,6 +119,7 @@ proc new*(
     sendProcessor: sendProcessorChain,
     rateLimitManager: rateLimitManager,
     waku: waku,
+    maxPendingRateLimitedTasks: maxPendingRateLimitedTasks,
     checkStoreForMessages: checkStoreForMessages,
     lastStoreCheckTime: Moment.now(),
   )
@@ -264,8 +274,27 @@ proc admitOnce(self: SendService, task: DeliveryTask): Future[bool] {.async.} =
   (await self.rateLimitManager.admit(task.msg.payload)).isOkOr:
     debug "over rate-limit budget, task waits for the epoch to roll",
       requestId = task.requestId, msgHash = task.msgHash.to0xHex()
+    task.rateLimitParked = true
     return false
+
+  task.refreshAfterRateLimitPark()
   task.firstAdmittedTime = Opt.some(Moment.now())
+  return true
+
+proc pendingRateLimitedTaskCount(self: SendService): int =
+  return self.taskCache.countIt(it.rateLimitParked)
+
+proc canParkForRateLimit(self: SendService): bool =
+  return self.pendingRateLimitedTaskCount() < self.maxPendingRateLimitedTasks
+
+proc attachRlnProof(self: SendService, task: DeliveryTask): Future[bool] {.async.} =
+  ## The facade is idempotent for a proof-bearing message. This keeps ordinary
+  ## transport retries on one proof/nonce; only an RLN rejection clears it.
+  task.msg = (await self.waku.attachRlnProof(task.msg)).valueOr:
+    error "SendService: failed to attach RLN proof, retrying next round",
+      requestId = task.requestId, error = error
+    task.state = DeliveryState.NextRoundRetry
+    return false
   return true
 
 proc trySendMessages*(self: SendService) {.async.} =
@@ -274,6 +303,8 @@ proc trySendMessages*(self: SendService) {.async.} =
   for task in tasksToSend:
     # Todo, check if it has any perf gain to run them concurrent...
     if not (await self.admitOnce(task)):
+      continue
+    if not (await self.attachRlnProof(task)):
       continue
     await self.sendProcessor.process(task)
 
@@ -305,9 +336,19 @@ proc send*(self: SendService, task: DeliveryTask) {.async.} =
       contentTopic = task.msg.contentTopic, error = error
 
   if not (await self.admitOnce(task)):
+    if not self.canParkForRateLimit():
+      task.state = DeliveryState.FailedToDeliver
+      task.errorDesc = RateLimitQueueFullError
+      reportTaskResult(self, task)
+      return
+
     info "SendService.send: parking task for a later round",
       requestId = task.requestId, msgHash = task.msgHash.to0xHex()
     task.state = DeliveryState.NextRoundRetry
+    self.addTask(task)
+    return
+
+  if not (await self.attachRlnProof(task)):
     self.addTask(task)
     return
 
