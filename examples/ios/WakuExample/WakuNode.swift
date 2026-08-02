@@ -104,6 +104,12 @@ private final class CallbackContext: @unchecked Sendable {
         continuation?.resume(returning: result)
     }
 
+    var receivedTerminalCallback: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return terminalResult != nil
+    }
+
     /// Resumes the Swift caller without releasing the opaque C callback
     /// context. A delayed terminal callback still owns and safely releases it.
     @discardableResult
@@ -418,7 +424,7 @@ actor WakuActor {
         let createResult = await createNode(config)
 
         guard createResult.success, let createdContext = createResult.ctx else {
-            if let failedContext = createResult.ctx {
+            if createResult.terminal, let failedContext = createResult.ctx {
                 _ = await callWakuSync { userData in
                     logosdelivery_destroy(failedContext, WakuActor.syncCallback, userData)
                 }
@@ -657,14 +663,29 @@ actor WakuActor {
 
     // MARK: - Helper for synchronous C calls
 
-    private func createNode(_ config: String) async -> (ctx: UnsafeMutableRawPointer?, success: Bool, result: String?) {
+    private func createNode(_ config: String) async -> (
+        ctx: UnsafeMutableRawPointer?,
+        success: Bool,
+        result: String?,
+        terminal: Bool
+    ) {
         let callbackContext = CallbackContext()
         // The terminal callback balances this retain, including after a late callback.
         let userData = Unmanaged.passRetained(callbackContext).toOpaque()
+        scheduleTimeout(for: callbackContext)
         let nodeContext = logosdelivery_create_node(config, WakuActor.syncCallback, userData)
         let result = await callbackContext.waitForResult()
 
-        return (nodeContext, result.success, result.result)
+        return (nodeContext, result.success, result.result, callbackContext.receivedTerminalCallback)
+    }
+
+    private func scheduleTimeout(for callbackContext: CallbackContext) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + 15) { [weak callbackContext] in
+            guard let context = callbackContext else { return }
+            if context.timeout() {
+                print("[WakuActor] Call timed out")
+            }
+        }
     }
 
     private func callWakuSync(_ work: @escaping (UnsafeMutableRawPointer) -> Void) async -> (success: Bool, result: String?) {
@@ -672,12 +693,7 @@ actor WakuActor {
         // The terminal callback balances this retain; timeout only resumes Swift.
         let userData = Unmanaged.passRetained(callbackContext).toOpaque()
 
-        DispatchQueue.global().asyncAfter(deadline: .now() + 15) { [weak callbackContext] in
-            guard let context = callbackContext else { return }
-            if context.timeout() {
-                print("[WakuActor] Call timed out")
-            }
-        }
+        scheduleTimeout(for: callbackContext)
 
         work(userData)
         return await callbackContext.waitForResult()
