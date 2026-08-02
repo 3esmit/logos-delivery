@@ -202,6 +202,14 @@ void on_response(int ret, const char *msg, size_t len, void *user_data) {
   complete_callback_result(waiter, false, msg, len);
 }
 
+static void destroy_failed_node(void *waku_ptr) {
+  cb_result_waiter waiter;
+  init_callback_waiter(&waiter);
+  (void)submit_request_and_wait(
+      &waiter, logosdelivery_destroy(waku_ptr, on_response, &waiter));
+  destroy_callback_waiter(&waiter);
+}
+
 // converts a cb_result into an instance of the kotlin WakuResult class
 jobject to_jni_result(JNIEnv *env, cb_result *result) {
   jclass myStructClass = (*env)->FindClass(env, "com/mobile/WakuResult");
@@ -329,6 +337,9 @@ jobject Java_com_mobile_WakuModule_wakuNew(JNIEnv *env, jobject thiz,
   }
   cb_result *result = wait_for_callback_result(&waiter);
   jobject response = to_jni_ptr(env, result, wakuPtr);
+  if (result->error && wakuPtr != NULL) {
+    destroy_failed_node(wakuPtr);
+  }
   (*env)->ReleaseStringUTFChars(env, configJson, config);
   destroy_callback_waiter(&waiter);
   return response;
