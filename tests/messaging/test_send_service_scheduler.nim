@@ -224,14 +224,14 @@ suite "SendService - rate-limit scheduling":
       code: LightPushErrorCode.OUT_OF_RLN_PROOF,
       desc: Opt.some("proof generation failed"),
     )
-    let invalidMessage: ErrorStatus =
+    let rawRlnValidatorError: ErrorStatus =
       (code: LightPushErrorCode.INVALID_MESSAGE, desc: Opt.some(RlnValidatorErrorMsg))
     let unrelatedInvalidMessage: ErrorStatus =
       (code: LightPushErrorCode.INVALID_MESSAGE, desc: Opt.some("message is malformed"))
     check:
       stale.isStaleRlnProof()
       not ordinary.isStaleRlnProof()
-      invalidMessage.isStaleRlnProof()
+      not rawRlnValidatorError.isStaleRlnProof()
       not unrelatedInvalidMessage.isStaleRlnProof()
 
     let task = buildTask("stale-proof", "payload", proof = @[7'u8])
@@ -271,24 +271,25 @@ suite "SendService - rate-limit scheduling":
       processor.calls == 2
       task.state == DeliveryState.SuccessfullyPropagated
 
-  asyncTest "relay treats a raw RLN validator rejection as stale-proof suspected":
-    let staleRelayPublish: PushMessageHandler = proc(
+  asyncTest "relay does not retry a raw RLN validator rejection":
+    let rawRlnValidatorErrorPublish: PushMessageHandler = proc(
         pubsubTopic: PubsubTopic, message: WakuMessage
     ): Future[WakuLightPushResult] {.async.} =
       return lighpushErrorResult(
         LightPushErrorCode.INVALID_MESSAGE, RlnValidatorErrorMsg & ": stale merkle path"
       )
     let processor =
-      RelaySendProcessor.new(false, staleRelayPublish, waku, waku.brokerCtx)
+      RelaySendProcessor.new(false, rawRlnValidatorErrorPublish, waku, waku.brokerCtx)
     let task = buildTask("relay-stale-proof", "payload", proof = @[7'u8])
     task.firstAdmittedTime = Opt.some(Moment.now())
     let firstAdmission = task.firstAdmittedTime
+    let originalProof = task.msg.proof
 
     await processor.process(task)
 
     check:
-      task.state == DeliveryState.NextRoundRetry
-      task.msg.proof.len == 0
+      task.state == DeliveryState.FailedToDeliver
+      task.msg.proof == originalProof
       task.firstAdmittedTime == firstAdmission
 
   asyncTest "relay does not retry an unrelated invalid message":

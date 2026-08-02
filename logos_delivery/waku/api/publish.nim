@@ -62,21 +62,12 @@ proc attachRlnProof*(
   return ok(msgWithProof)
 
 func isStaleRlnProof*(error: ErrorStatus): bool =
-  ## A lightpush result normalized by the node carries the explicit refresh
-  ## marker. Relay validates locally and returns a raw validator marker, so
-  ## recognize that narrow INVALID_MESSAGE form too. That relay marker is not
-  ## root-specific—relay collapses validator causes—but send-service-generated
-  ## proofs treat it as a stale-proof suspicion and refresh before retrying.
-  ## Other RLN and invalid message failures retain their normal retry/error
-  ## handling.
+  ## Only a normalized lightpush refresh marker proves retrying can regenerate
+  ## a stale proof. Relay's raw validator marker also covers malformed proofs,
+  ## timestamps, and replays, so it must remain a terminal delivery failure.
   return
-    (
-      error.code == LightPushErrorCode.OUT_OF_RLN_PROOF and
-      error.desc.get("").contains(RlnProofRefreshScheduledMsg)
-    ) or (
-      error.code == LightPushErrorCode.INVALID_MESSAGE and
-      error.desc.get("").contains(RlnValidatorErrorMsg)
-    )
+    error.code == LightPushErrorCode.OUT_OF_RLN_PROOF and
+    error.desc.get("").contains(RlnProofRefreshScheduledMsg)
 
 proc onRlnProofRejected*(self: Waku) =
   ## Start a non-blocking path refresh; the send-service loop owns retrying.

@@ -83,6 +83,43 @@ type
     errorListener: MessageErrorEventListener
     closed: bool
 
+  ReliableChannelListenerRegistrars* = object
+    ## Listener installation dependencies. The default delegates to the event
+    ## brokers; callers can replace one registration to exercise setup errors.
+    registerReceived*: proc(
+      brokerCtx: BrokerContext, handler: MessageReceivedEventListenerProc
+    ): Result[MessageReceivedEventListener, string] {.nimcall, gcsafe, raises: [].}
+    registerSent*: proc(
+      brokerCtx: BrokerContext, handler: MessageSentEventListenerProc
+    ): Result[MessageSentEventListener, string] {.nimcall, gcsafe, raises: [].}
+    registerError*: proc(
+      brokerCtx: BrokerContext, handler: MessageErrorEventListenerProc
+    ): Result[MessageErrorEventListener, string] {.nimcall, gcsafe, raises: [].}
+
+proc registerReceivedListener(
+    brokerCtx: BrokerContext, handler: MessageReceivedEventListenerProc
+): Result[MessageReceivedEventListener, string] {.gcsafe, raises: [].} =
+  MessageReceivedEvent.listen(brokerCtx, handler)
+
+proc registerSentListener(
+    brokerCtx: BrokerContext, handler: MessageSentEventListenerProc
+): Result[MessageSentEventListener, string] {.gcsafe, raises: [].} =
+  MessageSentEvent.listen(brokerCtx, handler)
+
+proc registerErrorListener(
+    brokerCtx: BrokerContext, handler: MessageErrorEventListenerProc
+): Result[MessageErrorEventListener, string] {.gcsafe, raises: [].} =
+  MessageErrorEvent.listen(brokerCtx, handler)
+
+proc defaultReliableChannelListenerRegistrars*(): ReliableChannelListenerRegistrars {.
+    gcsafe
+.} =
+  ReliableChannelListenerRegistrars(
+    registerReceived: registerReceivedListener,
+    registerSent: registerSentListener,
+    registerError: registerErrorListener,
+  )
+
 func init(
     T: type ChannelReqState,
     persistenceReqType: MessagePersistence,
@@ -109,9 +146,12 @@ proc stop*(self: ReliableChannel) {.async: (raises: []).} =
   ## Drops the event listeners and stops the SDS loops. Persisted SDS state survives.
   ## `closed` gates any in-flight receive handler that survives the listener drop.
   self.closed = true
-  await MessageReceivedEvent.dropListener(self.brokerCtx, self.receivedListener)
-  await MessageSentEvent.dropListener(self.brokerCtx, self.sentListener)
-  await MessageErrorEvent.dropListener(self.brokerCtx, self.errorListener)
+  if self.receivedListener.id != 0:
+    await MessageReceivedEvent.dropListener(self.brokerCtx, self.receivedListener)
+  if self.sentListener.id != 0:
+    await MessageSentEvent.dropListener(self.brokerCtx, self.sentListener)
+  if self.errorListener.id != 0:
+    await MessageErrorEvent.dropListener(self.brokerCtx, self.errorListener)
   await self.sdsHandler.stop()
 
 proc tryFinalizeChannelReq(self: ReliableChannel, channelReqId: RequestId) =
@@ -347,7 +387,9 @@ proc new*(
     segConfig: SegmentationConfig,
     sdsConfig: SdsConfig,
     brokerCtx: BrokerContext = globalBrokerContext(),
-): T =
+    listenerRegistrars: ReliableChannelListenerRegistrars =
+      defaultReliableChannelListenerRegistrars(),
+): Result[T, string] =
   ## Pipeline handlers (segmentation/SDS) are constructed inside the
   ## channel rather than handed in by the caller — they are implementation
   ## details of the channel, not knobs the API consumer should be wiring
@@ -367,14 +409,13 @@ proc new*(
   ## SDS-R repair rebroadcasts go straight to the dispatch tail.
   chn.sdsHandler.onRebroadcast = proc(wire: seq[byte]) {.gcsafe, raises: [].} =
     asyncSpawn chn.dispatchRepair(wire)
-  chn.sdsHandler.start()
 
   ## Each channel owns its own ingress + send-completion listeners on
   ## `chn.brokerCtx`, filtered to traffic addressed to this channel.
   ## Keeping the listeners (and the handler procs they call) inside the
   ## channel lets `onMessageReceived` / `onMessageFinal` stay private —
   ## the manager doesn't need to know about them.
-  chn.receivedListener = MessageReceivedEvent.listen(
+  chn.receivedListener = listenerRegistrars.registerReceived(
     chn.brokerCtx,
     proc(evt: MessageReceivedEvent): Future[void] {.async: (raises: []).} =
       ## Drop foreign traffic (non-Reliable-Channel `meta`) and traffic
@@ -386,27 +427,31 @@ proc new*(
       await chn.onMessageReceived(evt.messageHash, evt.message.payload)
     ,
   ).valueOr:
-    error "MessageReceivedEvent.listen failed", channelId = channelId, error = error
-    MessageReceivedEventListener()
+    chn.closed = true
+    asyncSpawn chn.stop()
+    return err("failed to register MessageReceivedEvent listener: " & error)
 
   ## Send-completion events are tagged with the per-segment messaging
   ## `requestId` — globally unique, so we don't need any channel filter
   ## up front. The handler scans this channel's pending entries for a
   ## match and is a no-op when the id belongs to a different channel.
-  chn.sentListener = MessageSentEvent.listen(
+  chn.sentListener = listenerRegistrars.registerSent(
     chn.brokerCtx,
     proc(evt: MessageSentEvent): Future[void] {.async: (raises: []).} =
       chn.onMessageFinal(evt.requestId, MessagingOutcome.Sent),
   ).valueOr:
-    error "MessageSentEvent.listen failed", channelId = channelId, error = error
-    MessageSentEventListener()
+    chn.closed = true
+    asyncSpawn chn.stop()
+    return err("failed to register MessageSentEvent listener: " & error)
 
-  chn.errorListener = MessageErrorEvent.listen(
+  chn.errorListener = listenerRegistrars.registerError(
     chn.brokerCtx,
     proc(evt: MessageErrorEvent): Future[void] {.async: (raises: []).} =
       chn.onMessageFinal(evt.requestId, MessagingOutcome.Failed),
   ).valueOr:
-    error "MessageErrorEvent.listen failed", channelId = channelId, error = error
-    MessageErrorEventListener()
+    chn.closed = true
+    asyncSpawn chn.stop()
+    return err("failed to register MessageErrorEvent listener: " & error)
 
-  return chn
+  chn.sdsHandler.start()
+  return ok(chn)

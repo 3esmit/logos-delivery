@@ -70,7 +70,8 @@ proc createReliableChannel*(
     segConfig = segConfig,
     sdsConfig = sdsConfig,
     brokerCtx = self.brokerCtx,
-  )
+  ).valueOr:
+    return err("failed to create reliable channel: " & error)
 
   self.channels[channelId] = chn
   return ok(channelId)

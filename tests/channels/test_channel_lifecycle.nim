@@ -1,15 +1,23 @@
 {.used.}
 
+import std/strutils
 import results, chronos, testutils/unittests
 import brokers/broker_context
 
 import ../testlib/[common, testasync]
 
 import logos_delivery/api/conf/channels_conf
+import logos_delivery/api/events/messaging_client_events
 import logos_delivery/api/messaging_client_api
+import logos_delivery/channels/reliable_channel
 import logos_delivery/channels/reliable_channel_manager
 import logos_delivery/channels/api/channel_lifecycle
 import logos_delivery/channels/encryption/noop_encryption
+
+proc failMessageSentListenerRegistration(
+    brokerCtx: BrokerContext, handler: MessageSentEventListenerProc
+): Result[MessageSentEventListener, string] {.gcsafe, raises: [].} =
+  err("injected MessageSentEvent listener registration failure")
 
 suite "Reliable Channel - lifecycle":
   asyncTest "channelExists tracks create and close":
@@ -84,3 +92,35 @@ suite "Reliable Channel - lifecycle":
 
       (await manager.closeChannel(channelId)).expect("closeChannel")
       check unsubscribed.len == 0
+
+  asyncTest "new rejects listener registration failures":
+    const
+      channelId = ChannelId("listener-registration-failure")
+      contentTopic = ContentTopic("/reliable-channel/test/listener-failure/proto")
+
+    lockNewGlobalBrokerContext:
+      var listenerRegistrars = defaultReliableChannelListenerRegistrars()
+      listenerRegistrars.registerSent = failMessageSentListenerRegistration
+      let created = ReliableChannel.new(
+        channelId = channelId,
+        contentTopic = contentTopic,
+        senderId = SdsParticipantID("local"),
+        segConfig = SegmentationConfig(
+          segmentSizeBytes: DefaultSegmentSizeBytes,
+          enableReedSolomon: false,
+          persistence: nil,
+        ),
+        sdsConfig = SdsConfig(
+          acknowledgementTimeoutMs: DefaultAcknowledgementTimeoutMs,
+          maxRetransmissions: DefaultMaxRetransmissions,
+          causalHistorySize: DefaultCausalHistorySize,
+          persistence: Opt.none(Persistence),
+        ),
+        listenerRegistrars = listenerRegistrars,
+      )
+
+      check:
+        created.isErr()
+        created.error().contains("MessageSentEvent listener")
+
+      await sleepAsync(0.milliseconds)
