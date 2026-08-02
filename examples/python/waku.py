@@ -2,6 +2,8 @@ import ctypes
 import argparse
 import sys
 
+from waku_callbacks import CALLBACK_TYPE, TerminalRequest, callback_bytes, call_and_wait
+
 if sys.platform == "darwin":
     _lib_ext = "dylib"
 elif sys.platform == "win32":
@@ -28,51 +30,17 @@ contains the '{_lib_path}' library.
 """)
     exit(1)
 
-RET_OK = 0
-RET_STALE_WARN = 3
-
-
-def callback_bytes(msg, length):
-    if not msg or length == 0:
-        return b""
-    return ctypes.string_at(msg, length)
-
-
-def decode_cbor_reply(raw):
-    if not raw:
-        return b""
-
-    header = raw[0]
-    if header >> 5 not in (2, 3):
-        raise ValueError("reply is not a CBOR text or byte string")
-
-    additional = header & 0x1f
-    if additional < 24:
-        header_len = 1
-        payload_len = additional
-    elif 24 <= additional <= 27:
-        length_len = 1 << (additional - 24)
-        header_len = 1 + length_len
-        if len(raw) < header_len:
-            raise ValueError("truncated CBOR string header")
-        payload_len = int.from_bytes(raw[1:header_len], "big")
-    else:
-        raise ValueError("unsupported CBOR string header")
-
-    if len(raw) != header_len + payload_len:
-        raise ValueError("CBOR string length does not match callback length")
-    return raw[header_len:]
-
-
 def handle_event(ret, msg, length, user_data):
     print("Event received: %s" %
           callback_bytes(msg, length).decode("utf-8", errors="replace"))
 
-def call_waku(func):
-    ret = func()
-    if (ret != 0):
-        print("Error in %s. Error code: %d" % (locals().keys(), ret))
-        exit(1)
+
+def request_or_exit(operation, dispatch):
+    try:
+        return call_and_wait(operation, dispatch)
+    except (RuntimeError, TimeoutError) as error:
+        print("Error calling %s: %s" % (operation, error))
+        sys.exit(1)
 
 # Parse params
 parser = argparse.ArgumentParser(description='libwaku integration in Python.')
@@ -103,75 +71,52 @@ json_config = "{ \
                   int(args.port),
                   args.key)
 
-callback_type = ctypes.CFUNCTYPE(None, ctypes.c_int,
-                                 ctypes.POINTER(ctypes.c_char),
-                                 ctypes.c_size_t, ctypes.c_void_p)
-
-
-def request_callback(operation, on_ok):
-    def handle_response(ret, msg, length, user_data):
-        if ret == RET_STALE_WARN:
-            return
-
-        raw = callback_bytes(msg, length)
-        if ret != RET_OK:
-            print("Error calling %s: %s" %
-                  (operation, raw.decode("utf-8", errors="replace")))
-            return
-
-        try:
-            on_ok(decode_cbor_reply(raw))
-        except ValueError as error:
-            print("Invalid CBOR reply from %s: %s" % (operation, error))
-
-    return callback_type(handle_response)
-
 # Node creation
 libwaku.logosdelivery_create_node.restype = ctypes.c_void_p
 libwaku.logosdelivery_create_node.argtypes = [ctypes.c_char_p,
-                             callback_type,
+                             CALLBACK_TYPE,
                              ctypes.c_void_p]
 
-create_callback = request_callback("logosdelivery_create_node", lambda reply: None)
-ctx = libwaku.logosdelivery_create_node(bytes(json_config, 'utf-8'),
-                                        create_callback, ctypes.c_void_p(0))
+create_request = TerminalRequest("logosdelivery_create_node")
+ctx = libwaku.logosdelivery_create_node(
+    bytes(json_config, 'utf-8'), create_request.callback, ctypes.c_void_p(0))
+try:
+    create_request.wait()
+except (RuntimeError, TimeoutError) as error:
+    print("Error creating node: %s" % error)
+    sys.exit(1)
+if not ctx:
+    print("Error creating node: no node context returned")
+    sys.exit(1)
 
 # Retrieve the current version of the library
 libwaku.waku_version.argtypes = [ctypes.c_void_p,
-                                 callback_type,
+                                 CALLBACK_TYPE,
                                  ctypes.c_void_p]
-version_callback = request_callback(
+version = request_or_exit(
     "waku_version",
-    lambda reply: print("Git Version: %s" % reply.decode("utf-8")))
-libwaku.waku_version(ctx, version_callback, ctypes.c_void_p(0))
+    lambda callback: libwaku.waku_version(ctx, callback, ctypes.c_void_p(0)))
+print("Git Version: %s" % version.decode("utf-8"))
 
 # Retrieve the default pubsub topic
-default_pubsub_topic = ""
-
-
-def set_default_pubsub_topic(reply):
-    global default_pubsub_topic
-    default_pubsub_topic = reply.decode("utf-8")
-    print("Default pubsub topic: %s" % default_pubsub_topic)
-
-
 libwaku.waku_default_pubsub_topic.argtypes = [ctypes.c_void_p,
-                                 callback_type,
+                                 CALLBACK_TYPE,
                                  ctypes.c_void_p]
-default_pubsub_topic_callback = request_callback(
-    "waku_default_pubsub_topic", set_default_pubsub_topic)
-libwaku.waku_default_pubsub_topic(ctx, default_pubsub_topic_callback,
-                                  ctypes.c_void_p(0))
+default_pubsub_topic = request_or_exit(
+    "waku_default_pubsub_topic",
+    lambda callback: libwaku.waku_default_pubsub_topic(
+        ctx, callback, ctypes.c_void_p(0))).decode("utf-8")
+print("Default pubsub topic: %s" % default_pubsub_topic)
 
 print("Bind addr: {}:{}".format(args.host, args.port))
 print("Waku Relay enabled: {}".format(args.relay))
 
 # Set the event callback
-callback = callback_type(handle_event) # This line is important so that the callback is not gc'ed
+callback = CALLBACK_TYPE(handle_event)  # Keep event listener callback alive.
 
 libwaku.logosdelivery_add_event_listener.argtypes = [ctypes.c_void_p,
                                                      ctypes.c_char_p,
-                                                     callback_type,
+                                                     CALLBACK_TYPE,
                                                      ctypes.c_void_p]
 libwaku.logosdelivery_add_event_listener.restype = ctypes.c_uint64
 for event_name in [b"onMessageSent", b"onMessageError", b"onMessagePropagated",
@@ -183,28 +128,33 @@ for event_name in [b"onMessageSent", b"onMessageError", b"onMessagePropagated",
 
 # Start the node
 libwaku.logosdelivery_start_node.argtypes = [ctypes.c_void_p,
-                               callback_type,
+                               CALLBACK_TYPE,
                                ctypes.c_void_p]
-start_callback = request_callback("logosdelivery_start_node", lambda reply: None)
-libwaku.logosdelivery_start_node(ctx, start_callback, ctypes.c_void_p(0))
+request_or_exit(
+    "logosdelivery_start_node",
+    lambda callback: libwaku.logosdelivery_start_node(
+        ctx, callback, ctypes.c_void_p(0)))
 
 # Subscribe to the default pubsub topic
 libwaku.waku_relay_subscribe.argtypes = [ctypes.c_void_p,
-                                         callback_type,
+                                         CALLBACK_TYPE,
                                          ctypes.c_void_p,
                                          ctypes.c_char_p]
-subscribe_callback = request_callback("waku_relay_subscribe", lambda reply: None)
-libwaku.waku_relay_subscribe(ctx, subscribe_callback, ctypes.c_void_p(0),
-                             default_pubsub_topic.encode('utf-8'))
+request_or_exit(
+    "waku_relay_subscribe",
+    lambda callback: libwaku.waku_relay_subscribe(
+        ctx, callback, ctypes.c_void_p(0), default_pubsub_topic.encode('utf-8')))
 
 libwaku.waku_connect.argtypes = [ctypes.c_void_p,
-                                 callback_type,
+                                 CALLBACK_TYPE,
                                  ctypes.c_void_p,
                                  ctypes.c_char_p,
                                  ctypes.c_int]
-connect_callback = request_callback("waku_connect", lambda reply: None)
-libwaku.waku_connect(ctx, connect_callback, ctypes.c_void_p(0),
-                     args.peer.encode('utf-8'), 10000)
+if args.peer:
+    request_or_exit(
+        "waku_connect",
+        lambda callback: libwaku.waku_connect(
+            ctx, callback, ctypes.c_void_p(0), args.peer.encode('utf-8'), 10000))
 
 # app = Flask(__name__)
 # @app.route("/")
