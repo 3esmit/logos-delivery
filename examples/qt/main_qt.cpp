@@ -5,7 +5,7 @@
 #include "waku_handler.h"
 
 void event_handler(int callerRet, const char* msg, size_t len, void* userData) {
-    printf("Receiving message %s\n", msg);
+    print_request_result(callerRet, msg, len, userData);
 }
 
 int main(int argc, char *argv[]) {
@@ -41,4 +41,3 @@ int main(int argc, char *argv[]) {
 
     return app.exec();
 }
-

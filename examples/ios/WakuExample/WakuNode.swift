@@ -126,21 +126,74 @@ actor WakuActor {
     // Using a simple static reference (safe because we only have one instance)
     private static var sharedEventContinuation: AsyncStream<String>.Continuation?
 
-    private static let eventCallback: WakuCallBack = { ret, msg, len, userData in
-        guard ret == RET_OK, let msg = msg else { return }
-        let str = String(cString: msg)
+    private static func rawCallbackMessage(_ message: UnsafePointer<CChar>?, length: Int) -> String? {
+        guard length > 0, let message = message else { return nil }
+        let bytes = UnsafeBufferPointer(start: message, count: length).map { UInt8(bitPattern: $0) }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
+    private static func decodeCborRequestReply(_ message: UnsafePointer<CChar>?, length: Int) -> Data? {
+        guard length >= 0 else { return nil }
+        guard length > 0 else { return Data() }
+        guard let message = message else { return nil }
+
+        let bytes = UnsafeBufferPointer(start: message, count: length).map { UInt8(bitPattern: $0) }
+        guard let initial = bytes.first, initial >> 5 == 2 || initial >> 5 == 3 else {
+            return nil
+        }
+
+        let headerLength: Int
+        let decodedLength: UInt64
+        switch initial & 0x1f {
+        case 0...23:
+            headerLength = 1
+            decodedLength = UInt64(initial & 0x1f)
+        case 24:
+            guard length >= 2 else { return nil }
+            headerLength = 2
+            decodedLength = UInt64(bytes[1])
+        case 25:
+            guard length >= 3 else { return nil }
+            headerLength = 3
+            decodedLength = (UInt64(bytes[1]) << 8) | UInt64(bytes[2])
+        case 26:
+            guard length >= 5 else { return nil }
+            headerLength = 5
+            decodedLength = (UInt64(bytes[1]) << 24) | (UInt64(bytes[2]) << 16) |
+                (UInt64(bytes[3]) << 8) | UInt64(bytes[4])
+        case 27:
+            guard length >= 9 else { return nil }
+            headerLength = 9
+            decodedLength = bytes[1...8].reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+        default:
+            return nil
+        }
+
+        guard decodedLength == UInt64(length - headerLength) else { return nil }
+        return Data(bytes[headerLength...])
+    }
+
+    private static let eventCallback: FFICallBack = { ret, msg, len, userData in
+        guard ret == RET_OK,
+              let str = WakuActor.rawCallbackMessage(msg, length: Int(len)) else { return }
         WakuActor.sharedEventContinuation?.yield(str)
     }
 
-    private static let syncCallback: WakuCallBack = { ret, msg, len, userData in
+    private static let syncCallback: FFICallBack = { ret, msg, len, userData in
+        guard ret != RET_STALE_WARN else { return }
         guard let userData = userData else { return }
         let context = Unmanaged<CallbackContext>.fromOpaque(userData).takeUnretainedValue()
-        let success = (ret == RET_OK)
-        var resultStr: String? = nil
-        if let msg = msg {
-            resultStr = String(cString: msg)
+
+        if ret == RET_OK {
+            guard WakuActor.decodeCborRequestReply(msg, length: Int(len)) != nil else {
+                context.resumeOnce(returning: (false, "Invalid CBOR request reply"))
+                return
+            }
+            context.resumeOnce(returning: (true, nil))
+            return
         }
-        context.resumeOnce(returning: (success, resultStr))
+
+        context.resumeOnce(returning: (false, WakuActor.rawCallbackMessage(msg, length: Int(len))))
     }
 
     // MARK: - Stream Setup
@@ -321,11 +374,18 @@ actor WakuActor {
 
             // Set up a simple callback for logosdelivery_create_node
             let newCtx = logosdelivery_create_node(config, { ret, msg, len, userData in
+                guard ret != RET_STALE_WARN else { return }
                 guard let userData = userData else { return }
                 let context = Unmanaged<CallbackContext>.fromOpaque(userData).takeUnretainedValue()
-                context.success = (ret == RET_OK)
-                if let msg = msg {
-                    context.result = String(cString: msg)
+
+                if ret == RET_OK && WakuActor.decodeCborRequestReply(msg, length: Int(len)) != nil {
+                    context.success = true
+                    context.result = nil
+                } else {
+                    context.success = false
+                    context.result = ret == RET_OK
+                        ? "Invalid CBOR request reply"
+                        : WakuActor.rawCallbackMessage(msg, length: Int(len))
                 }
             }, userDataPtr)
 

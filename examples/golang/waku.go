@@ -1,29 +1,65 @@
 package main
 
 /*
-	#cgo LDFLAGS: -L../../build/ -llogosdelivery
+	#cgo LDFLAGS: -L../../build/ -llogosdelivery -pthread
 	#cgo LDFLAGS: -L../../ -Wl,-rpath,../../
 
+	#include "../../library/ffi_callback.h"
 	#include "../../library/liblogosdelivery_kernel.h"
+	#include <pthread.h>
 	#include <stdio.h>
 	#include <stdlib.h>
+	#include <string.h>
 
 	extern void globalEventCallback(int ret, char* msg, size_t len, void* userData);
 
 	typedef struct {
+		pthread_mutex_t mutex;
+		pthread_cond_t condition;
 		int ret;
 		char* msg;
 		size_t len;
+		int complete;
 	} Resp;
 
 	static void* allocResp() {
-		return calloc(1, sizeof(Resp));
+		Resp* resp = calloc(1, sizeof(Resp));
+		if (resp == NULL) {
+			return NULL;
+		}
+		if (pthread_mutex_init(&resp->mutex, NULL) != 0) {
+			free(resp);
+			return NULL;
+		}
+		if (pthread_cond_init(&resp->condition, NULL) != 0) {
+			pthread_mutex_destroy(&resp->mutex);
+			free(resp);
+			return NULL;
+		}
+		resp->ret = RET_ERR;
+		return resp;
 	}
 
 	static void freeResp(void* resp) {
 		if (resp != NULL) {
-			free(resp);
+			Resp* m = (Resp*) resp;
+			free(m->msg);
+			pthread_cond_destroy(&m->condition);
+			pthread_mutex_destroy(&m->mutex);
+			free(m);
 		}
+	}
+
+	static void waitResp(void* resp) {
+		if (resp == NULL) {
+			return;
+		}
+		Resp* m = (Resp*) resp;
+		pthread_mutex_lock(&m->mutex);
+		while (!m->complete) {
+			pthread_cond_wait(&m->condition, &m->mutex);
+		}
+		pthread_mutex_unlock(&m->mutex);
 	}
 
 	static char* getMyCharPtr(void* resp) {
@@ -44,19 +80,67 @@ package main
 
 	static int getRet(void* resp) {
 		if (resp == NULL) {
-			return 0;
+			return RET_ERR;
 		}
 		Resp* m = (Resp*) resp;
 		return m->ret;
 	}
 
+	static char* copyCallbackMessage(const char* msg, size_t len) {
+		char* copy = malloc(len + 1);
+		if (copy == NULL) {
+			return NULL;
+		}
+		if (len != 0) {
+			memcpy(copy, msg, len);
+		}
+		copy[len] = '\0';
+		return copy;
+	}
+
 	// resp must be set != NULL in case interest on retrieving data from the callback
-	static void callback(int ret, char* msg, size_t len, void* resp) {
+	static void callback(int ret, const char* msg, size_t len, void* resp) {
+		if (ret == RET_STALE_WARN) {
+			return;
+		}
+
+		if (ret == RET_OK && len != 0) {
+			const char* payload;
+			size_t payloadLen;
+
+			if (logosdelivery_decode_cbor_reply(msg, len, &payload, &payloadLen)) {
+				msg = payload;
+				len = payloadLen;
+			} else {
+				ret = RET_ERR;
+				msg = "invalid CBOR request reply";
+				len = sizeof("invalid CBOR request reply") - 1;
+			}
+		}
+		if (msg == NULL && len != 0) {
+			ret = RET_ERR;
+			len = 0;
+		}
+
 		if (resp != NULL) {
 			Resp* m = (Resp*) resp;
-			m->ret = ret;
-			m->msg = msg;
-			m->len = len;
+			char* copy = copyCallbackMessage(msg, len);
+			if (copy == NULL) {
+				ret = RET_ERR;
+				len = 0;
+			}
+
+			pthread_mutex_lock(&m->mutex);
+			if (!m->complete) {
+				m->ret = ret;
+				m->msg = copy;
+				m->len = len;
+				m->complete = 1;
+				pthread_cond_signal(&m->condition);
+			} else {
+				free(copy);
+			}
+			pthread_mutex_unlock(&m->mutex);
 		}
 	}
 
@@ -67,11 +151,13 @@ package main
 			printf("Failed the call to: %s. Returned code: %d\n", #call, ret);         \
 			exit(1);                                                                   \
 		}                                                                            \
+		waitResp(resp);                                                               \
 	} while (0)
 
 	static void* cGoWakuNew(const char* configJson, void* resp) {
-		// We pass NULL because we are not interested in retrieving data from this callback
+		// The callback owns the terminal request result consumed by the caller.
 		void* ret = logosdelivery_create_node(configJson, (FFICallBack) callback, resp);
+		waitResp(resp);
 		return ret;
 	}
 

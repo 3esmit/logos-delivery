@@ -1,3 +1,4 @@
+#include "../../../../../../../library/ffi_callback.h"
 #include "liblogosdelivery_kernel.h"
 #include <android/log.h>
 #include <jni.h>
@@ -39,37 +40,54 @@ void free_cb_result(cb_result *result) {
   }
 }
 
+static char *copy_callback_message(const char *message, size_t length) {
+  char *copy = malloc(length + 1);
+  if (copy == NULL) {
+    return NULL;
+  }
+  if (message != NULL && length != 0) {
+    memcpy(copy, message, length);
+  }
+  copy[length] = '\0';
+  return copy;
+}
+
+static void set_callback_result(
+    cb_result **data_ref, bool error, const char *message, size_t length) {
+  *data_ref = malloc(sizeof(cb_result));
+  (*data_ref)->error = error;
+  (*data_ref)->message = copy_callback_message(message, length);
+}
+
 // callback executed by libwaku functions. It expects user_data to be a
 // cb_result*.
 void on_response(int ret, const char *msg, size_t len, void *user_data) {
-  if (ret != RET_OK) {
-    char errMsg[300];
-    snprintf(errMsg, 300, "function execution failed. Returned code: %d, %s\n", ret, msg);
-    if (user_data != NULL) {
-      cb_result **data_ref = (cb_result **)user_data;
-      (*data_ref) = malloc(sizeof(cb_result));
-      (*data_ref)->error = true;
-      (*data_ref)->message = malloc(len * sizeof(char) + 1);
-      (*data_ref)->message[0] = '\0';
-      strncat((*data_ref)->message, msg, len);
-    }
+  if (ret == RET_STALE_WARN || user_data == NULL) {
     return;
   }
 
-  if (user_data == NULL)
+  cb_result **data_ref = (cb_result **)user_data;
+  if (ret != RET_OK) {
+    set_callback_result(data_ref, true, msg, len);
     return;
+  }
 
   if (len == 0) {
     len = 14;
     msg = "on_response-ok";
+  } else {
+    const char *payload;
+    size_t payload_len;
+    if (!logosdelivery_decode_cbor_reply(msg, len, &payload, &payload_len)) {
+      set_callback_result(data_ref, true, "invalid CBOR request reply",
+                          sizeof("invalid CBOR request reply") - 1);
+      return;
+    }
+    msg = payload;
+    len = payload_len;
   }
 
-  cb_result **data_ref = (cb_result **)user_data;
-  (*data_ref) = malloc(sizeof(cb_result));
-  (*data_ref)->error = false;
-  (*data_ref)->message = malloc(len * sizeof(char) + 1);
-  (*data_ref)->message[0] = '\0';
-  strncat((*data_ref)->message, msg, len);
+  set_callback_result(data_ref, false, msg, len);
 }
 
 // converts a cb_result into an instance of the kotlin WakuResult class
