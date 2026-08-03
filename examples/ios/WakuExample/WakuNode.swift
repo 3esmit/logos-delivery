@@ -50,32 +50,38 @@ struct TimestampedError: Identifiable, Equatable {
 
 private typealias CallbackResult = (success: Bool, result: String?)
 
+private enum CallbackCompletion {
+    case terminal(CallbackResult)
+    case timeout
+}
+
 private final class CallbackContext: @unchecked Sendable {
     private let lock = NSLock()
-    private var continuation: CheckedContinuation<CallbackResult, Never>?
+    private var continuation: CheckedContinuation<CallbackCompletion, Never>?
     private var terminalResult: CallbackResult?
-    private var timeoutResult: CallbackResult?
+    private var lateTerminalHandler: (@Sendable () -> Void)?
+    private var timedOut = false
     private var resultDelivered = false
 
-    func waitForResult() async -> CallbackResult {
+    func waitForResult() async -> CallbackCompletion {
         await withCheckedContinuation { continuation in
-            let completedResult: CallbackResult?
+            let completion: CallbackCompletion?
 
             lock.lock()
-            if let timeout = timeoutResult {
+            if timedOut {
                 resultDelivered = true
-                completedResult = timeout
+                completion = .timeout
             } else if let terminal = terminalResult {
                 resultDelivered = true
-                completedResult = terminal
+                completion = .terminal(terminal)
             } else {
                 self.continuation = continuation
-                completedResult = nil
+                completion = nil
             }
             lock.unlock()
 
-            if let completed = completedResult {
-                continuation.resume(returning: completed)
+            if let resolvedCompletion = completion {
+                continuation.resume(returning: resolvedCompletion)
             }
         }
     }
@@ -83,7 +89,8 @@ private final class CallbackContext: @unchecked Sendable {
     /// Delivers the single terminal request callback. The retained opaque
     /// pointer is consumed by that callback, never by the timeout path.
     func completeTerminal(with result: CallbackResult) {
-        let continuation: CheckedContinuation<CallbackResult, Never>?
+        let continuation: CheckedContinuation<CallbackCompletion, Never>?
+        let lateHandler: (@Sendable () -> Void)?
 
         lock.lock()
         guard terminalResult == nil else {
@@ -92,6 +99,8 @@ private final class CallbackContext: @unchecked Sendable {
         }
 
         terminalResult = result
+        lateHandler = timedOut ? lateTerminalHandler : nil
+        lateTerminalHandler = nil
         if !resultDelivered, let waitingContinuation = self.continuation {
             resultDelivered = true
             self.continuation = nil
@@ -101,15 +110,34 @@ private final class CallbackContext: @unchecked Sendable {
         }
         lock.unlock()
 
-        continuation?.resume(returning: result)
+        continuation?.resume(returning: .terminal(result))
+        lateHandler?()
+    }
+
+    /// Registers cleanup for a resource returned by an operation that may
+    /// complete after Swift has timed out. If the terminal callback already
+    /// arrived after the timeout, invoke the handler immediately.
+    func setLateTerminalHandler(_ handler: @escaping @Sendable () -> Void) {
+        var invokeImmediately = false
+
+        lock.lock()
+        if timedOut, terminalResult != nil {
+            invokeImmediately = true
+        } else {
+            lateTerminalHandler = handler
+        }
+        lock.unlock()
+
+        if invokeImmediately {
+            handler()
+        }
     }
 
     /// Resumes the Swift caller without releasing the opaque C callback
     /// context. A delayed terminal callback still owns and safely releases it.
     @discardableResult
     func timeout() -> Bool {
-        let continuation: CheckedContinuation<CallbackResult, Never>?
-        let timeoutResult: CallbackResult = (false, "Timeout")
+        let continuation: CheckedContinuation<CallbackCompletion, Never>?
 
         lock.lock()
         guard !resultDelivered, terminalResult == nil else {
@@ -117,7 +145,7 @@ private final class CallbackContext: @unchecked Sendable {
             return false
         }
 
-        self.timeoutResult = timeoutResult
+        timedOut = true
         if let waitingContinuation = self.continuation {
             resultDelivered = true
             self.continuation = nil
@@ -127,7 +155,7 @@ private final class CallbackContext: @unchecked Sendable {
         }
         lock.unlock()
 
-        continuation?.resume(returning: timeoutResult)
+        continuation?.resume(returning: .timeout)
         return true
     }
 }
@@ -418,7 +446,7 @@ actor WakuActor {
         let createResult = await createNode(config)
 
         guard createResult.success, let createdContext = createResult.ctx else {
-            if let failedContext = createResult.ctx {
+            if !createResult.timedOut, let failedContext = createResult.ctx {
                 _ = await callWakuSync { userData in
                     logosdelivery_destroy(failedContext, WakuActor.syncCallback, userData)
                 }
@@ -657,14 +685,43 @@ actor WakuActor {
 
     // MARK: - Helper for synchronous C calls
 
-    private func createNode(_ config: String) async -> (ctx: UnsafeMutableRawPointer?, success: Bool, result: String?) {
+    private func createNode(_ config: String) async -> (
+        ctx: UnsafeMutableRawPointer?,
+        success: Bool,
+        result: String?,
+        timedOut: Bool
+    ) {
         let callbackContext = CallbackContext()
         // The terminal callback balances this retain, including after a late callback.
         let userData = Unmanaged.passRetained(callbackContext).toOpaque()
+        scheduleTimeout(for: callbackContext)
         let nodeContext = logosdelivery_create_node(config, WakuActor.syncCallback, userData)
-        let result = await callbackContext.waitForResult()
+        if let nodeContext {
+            // Keep the actor alive until late creation cleanup has completed.
+            callbackContext.setLateTerminalHandler { [self] in
+                Task {
+                    await self.destroyTimedOutCreateContext(nodeContext)
+                }
+            }
+        }
+        let completion = await callbackContext.waitForResult()
 
-        return (nodeContext, result.success, result.result)
+        switch completion {
+        case .terminal(let result):
+            return (nodeContext, result.success, result.result, false)
+        case .timeout:
+            // A timeout cannot prove that the C request stopped. Do not destroy
+            // a returned context until its terminal callback has run. The
+            // callback context owns a late cleanup handler for that context.
+            return (nil, false, "Timeout", true)
+        }
+    }
+
+    private func destroyTimedOutCreateContext(_ context: UnsafeMutableRawPointer) async {
+        print("[WakuActor] Destroying node context after timed-out creation completed")
+        _ = await callWakuSync { userData in
+            logosdelivery_destroy(context, WakuActor.syncCallback, userData)
+        }
     }
 
     private func scheduleTimeout(for callbackContext: CallbackContext) {
@@ -684,7 +741,13 @@ actor WakuActor {
         scheduleTimeout(for: callbackContext)
 
         work(userData)
-        return await callbackContext.waitForResult()
+        let completion = await callbackContext.waitForResult()
+        switch completion {
+        case .terminal(let result):
+            return result
+        case .timeout:
+            return (false, "Timeout")
+        }
     }
 }
 
