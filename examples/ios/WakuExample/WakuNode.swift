@@ -697,8 +697,8 @@ actor WakuActor {
         scheduleTimeout(for: callbackContext)
         let nodeContext = logosdelivery_create_node(config, WakuActor.syncCallback, userData)
         if let nodeContext {
-            callbackContext.setLateTerminalHandler { [weak self] in
-                guard let self else { return }
+            // Keep the actor alive until late creation cleanup has completed.
+            callbackContext.setLateTerminalHandler { [self] in
                 Task {
                     await self.destroyTimedOutCreateContext(nodeContext)
                 }
