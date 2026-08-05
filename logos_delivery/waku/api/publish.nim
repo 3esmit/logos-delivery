@@ -41,7 +41,9 @@ proc relayPushHandler*(self: Waku): PushMessageHandler =
   ## Builds the relay publish handler used by the send pipeline. Caller
   ## ensures relay is mounted. The handler validates and republishes; the
   ## proof is attached by the messaging layer via `attachRlnProof`.
-  return getRelayPushHandler(self.node.wakuRelay)
+  if self.node.rln.isNil():
+    return getRelayPushHandler(self.node.wakuRelay)
+  return getRelayPushHandler(self.node.wakuRelay, self.node.rln)
 
 proc attachRlnProof*(
     self: Waku, message: WakuMessage

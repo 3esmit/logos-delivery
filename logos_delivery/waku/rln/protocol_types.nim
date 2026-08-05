@@ -74,6 +74,19 @@ type MessageValidationResult* {.pure.} = enum
   Invalid
   Spam
 
+## Detailed RLN outcome used by local relay callers that need to distinguish
+## a refreshable Merkle-root miss from terminal validation failures.
+type MessageValidationCause* {.pure.} = enum
+  Valid
+  InvalidEncoding
+  InvalidTimestamp
+  TimestampMismatch
+  StaleRoot
+  ProofVerificationError
+  InvalidProof
+  ProofMetadataError
+  Spam
+
 # Protobufs enc and init
 proc init*(T: type RateLimitProof, buffer: seq[byte]): ProtoResult[T] =
   var nsp: RateLimitProof

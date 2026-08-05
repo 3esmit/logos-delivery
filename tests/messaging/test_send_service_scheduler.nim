@@ -226,12 +226,17 @@ suite "SendService - rate-limit scheduling":
     )
     let rawRlnValidatorError: ErrorStatus =
       (code: LightPushErrorCode.INVALID_MESSAGE, desc: Opt.some(RlnValidatorErrorMsg))
+    let terminalRlnValidationError: ErrorStatus = (
+      code: LightPushErrorCode.INVALID_MESSAGE,
+      desc: Opt.some(RlnTerminalValidationErrorMsg & ": InvalidProof"),
+    )
     let unrelatedInvalidMessage: ErrorStatus =
       (code: LightPushErrorCode.INVALID_MESSAGE, desc: Opt.some("message is malformed"))
     check:
       stale.isStaleRlnProof()
       not ordinary.isStaleRlnProof()
       not rawRlnValidatorError.isStaleRlnProof()
+      not terminalRlnValidationError.isStaleRlnProof()
       not unrelatedInvalidMessage.isStaleRlnProof()
 
     let task = buildTask("stale-proof", "payload", proof = @[7'u8])

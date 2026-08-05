@@ -65,10 +65,8 @@ proc attachRlnProofAndValidate(
     rln: Rln, wakuRelay: WakuRelay, pubsubTopic: PubsubTopic, message: WakuMessage
 ): Future[Result[WakuMessage, RlnPublishError]] {.async.} =
   ## Attaches an RLN proof to `message` and validates it via `wakuRelay`.
-  ## If the validator rejects it as RLN-invalid (error contains
-  ## RlnValidatorErrorMsg), schedules a background merkle proof refresh and
-  ## fails early with StaleProofSuspected — the caller decides whether to
-  ## retry. Callers invoke only when RLN is mounted.
+  ## Only an explicitly stale Merkle root schedules a refresh; every other
+  ## RLN validation cause is terminal. Callers invoke only when RLN is mounted.
   var msg = message
   msg.proof = (
     await rln.generateRLNProof(msg.toRLNSignal(), float64(getTime().toUnix()))
@@ -79,20 +77,23 @@ proc attachRlnProofAndValidate(
       )
     )
 
+  let cause = await rln.validateMessageDetailed(msg)
+  if cause == MessageValidationCause.StaleRoot:
+    info "relay publish rejected as RLN-invalid; scheduling merkle proof refresh"
+    rln.groupManager.scheduleMerkleProofRefresh()
+    return
+      err(RlnPublishError(kind: StaleProofSuspected, desc: RlnProofRefreshScheduledMsg))
+  if cause != MessageValidationCause.Valid:
+    return err(
+      RlnPublishError(
+        kind: ValidationRejected, desc: RlnTerminalValidationErrorMsg & ": " & $cause
+      )
+    )
+
   let validateResult = await wakuRelay.validateMessage(pubsubTopic, msg)
   if validateResult.isOk():
     return ok(msg)
-  if not validateResult.error.contains(RlnValidatorErrorMsg):
-    return err(RlnPublishError(kind: ValidationRejected, desc: validateResult.error))
-
-  info "relay publish rejected as RLN-invalid; scheduling merkle proof refresh"
-  rln.groupManager.scheduleMerkleProofRefresh()
-  return err(
-    RlnPublishError(
-      kind: StaleProofSuspected,
-      desc: RlnProofRefreshScheduledMsg & ": " & validateResult.error,
-    )
-  )
+  return err(RlnPublishError(kind: ValidationRejected, desc: validateResult.error))
 
 proc installRelayApiHandlers*(
     router: var RestRouter, node: WakuNode, cache: MessageCache

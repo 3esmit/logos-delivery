@@ -207,7 +207,11 @@ proc mountLightPush*(
     return err(MountWithoutRelayError)
 
   info "mounting lightpush with relay"
-  let pushHandler = lightpush_protocol.getRelayPushHandler(node.wakuRelay)
+  let pushHandler =
+    if node.rln.isNil():
+      lightpush_protocol.getRelayPushHandler(node.wakuRelay)
+    else:
+      lightpush_protocol.getRelayPushHandler(node.wakuRelay, node.rln)
 
   node.wakuLightPush = WakuLightPush.new(
     node.peerManager, node.rng, pushHandler, node.wakuAutoSharding, Opt.some(rateLimit)
