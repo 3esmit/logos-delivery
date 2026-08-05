@@ -137,9 +137,7 @@ func hasNonApplicationLease(
   entry.channelContentTopics.getOrDefault(contentTopic, 0) > 0 or
     entry.sendContentTopics.getOrDefault(contentTopic, 0) > 0
 
-proc retainApplication(
-    entry: var ShardSubscription, contentTopic: ContentTopic
-): bool =
+proc retainApplication(entry: var ShardSubscription, contentTopic: ContentTopic): bool =
   if contentTopic in entry.applicationContentTopics:
     return false
   entry.applicationContentTopics.incl(contentTopic)

@@ -243,12 +243,14 @@ proc releaseLeasesForRemovedTasks(self: SendService) =
   for task in self.taskCache:
     let terminal =
       task.state == DeliveryState.SuccessfullyValidated or
-      task.state == DeliveryState.FailedToDeliver or
-      (task.state == DeliveryState.SuccessfullyPropagated and
-        (task.isEphemeral() or not self.checkStoreForMessages)) or
-      (task.firstPropagatedTime.isSome() and
+      task.state == DeliveryState.FailedToDeliver or (
+        task.state == DeliveryState.SuccessfullyPropagated and
+        (task.isEphemeral() or not self.checkStoreForMessages)
+      ) or (
+        task.firstPropagatedTime.isSome() and
         task.state != DeliveryState.SuccessfullyValidated and
-        task.propagationAge() > MaxTimeInCache)
+        task.propagationAge() > MaxTimeInCache
+      )
     if terminal:
       self.releaseSendLease(task)
 

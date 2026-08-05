@@ -58,8 +58,8 @@ suite "ReliableChannelManager - lifecycle":
     lockNewGlobalBrokerContext:
       let brokerCtx = globalBrokerContext()
       manager = ReliableChannelManager.new(ReliableChannelManagerConf()).expect(
-        "ReliableChannelManager.new"
-      )
+          "ReliableChannelManager.new"
+        )
       discard manager
         .createReliableChannel(firstChannelId, firstTopic, SdsParticipantID("local"))
         .expect("create first channel")
@@ -110,12 +110,13 @@ suite "ReliableChannelManager - lifecycle":
     lockNewGlobalBrokerContext:
       let brokerCtx = globalBrokerContext()
       manager = ReliableChannelManager.new(ReliableChannelManagerConf()).expect(
-        "ReliableChannelManager.new"
-      )
+          "ReliableChannelManager.new"
+        )
       MessagingSubscribeChannel
         .setProvider(
           brokerCtx,
-          proc(_: ContentTopic): Result[void, string] = ok(),
+          proc(_: ContentTopic): Result[void, string] =
+            ok(),
         )
         .expect("setProvider MessagingSubscribeChannel")
       MessagingUnsubscribeChannel

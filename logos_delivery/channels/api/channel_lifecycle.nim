@@ -73,7 +73,8 @@ proc createReliableChannel*(
     sdsConfig = sdsConfig,
     brokerCtx = self.brokerCtx,
   ).valueOr:
-    if not subscriptionDeferred and MessagingUnsubscribeChannel.isProvided(self.brokerCtx):
+    if not subscriptionDeferred and
+        MessagingUnsubscribeChannel.isProvided(self.brokerCtx):
       discard MessagingUnsubscribeChannel.request(self.brokerCtx, contentTopic)
     return err("failed to create reliable channel: " & error)
 
@@ -96,7 +97,8 @@ proc closeChannel*(
   if chn.isNil():
     return err("unknown channel: " & channelId)
   self.channels.del(channelId)
-  let subscriptionDeferred = self.deferredChannelSubscriptions.getOrDefault(channelId, false)
+  let subscriptionDeferred =
+    self.deferredChannelSubscriptions.getOrDefault(channelId, false)
   self.deferredChannelSubscriptions.del(channelId)
   await chn.stop()
 
