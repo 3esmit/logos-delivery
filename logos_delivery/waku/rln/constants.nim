@@ -20,6 +20,10 @@ const RlnCredentialsFilename* = "rlnCredentials.txt"
 # RLN Validator message rejection Error string, is used to trigger proof refresh and publish retry in the lightpush client
 const RlnValidatorErrorMsg* = "RLN validation failed"
 
+# Terminal RLN causes are deliberately distinct from the legacy validator
+# marker so lightpush callers cannot mistake them for a refreshable proof.
+const RlnTerminalValidationErrorMsg* = "RLN validation rejected"
+
 # OUT_OF_RLN_PROOF description marker telling callers a background refresh was
 # scheduled and retrying the publish is worthwhile.
 const RlnProofRefreshScheduledMsg* =

@@ -328,6 +328,55 @@ suite "Waku rln relay":
       msgValidate1 == MessageValidationResult.Valid
       msgValidate2 == MessageValidationResult.Invalid
 
+  asyncTest "validateMessageDetailed preserves retryable and terminal causes":
+    let index = MembershipIndex(5)
+    let wakuRlnConfig = getWakuRlnConfig(manager = manager, index = index)
+
+    var rln: Rln
+    lockNewGlobalBrokerContext:
+      rln = (await Rln.new(wakuRlnConfig)).valueOr:
+        raiseAssert $error
+
+    let manager = cast[OnchainGroupManager](rln.groupManager)
+    (waitFor manager.register(generateCredentials(), UserMessageLimit(20))).isOkOr:
+      raiseAssert "error returned when calling register: " & error
+
+    var validMessage = WakuMessage(
+      payload: "detailed validation".toBytes(),
+      contentTopic: DefaultPubsubTopic,
+      timestamp: now(),
+    )
+    rln.unsafeAppendRLNProof(validMessage, rln.getCurrentEpoch(), MessageId(1)).isOkOr:
+      raiseAssert $error
+
+    let validCause = await rln.validateMessageDetailed(validMessage)
+    check validCause == MessageValidationCause.Valid
+
+    var staleMessage = validMessage
+    let validProof = RateLimitProof.init(validMessage.proof).valueOr:
+      raiseAssert $error
+    var staleProof = validProof
+    staleProof.merkleRoot = default(MerkleNode)
+    staleMessage.proof = staleProof.encode().buffer
+    let staleCause = await rln.validateMessageDetailed(staleMessage)
+    check staleCause == MessageValidationCause.StaleRoot
+
+    var malformedMessage = validMessage
+    malformedMessage.proof = @[byte(0x80)]
+    let malformedCause = await rln.validateMessageDetailed(malformedMessage)
+    check malformedCause == MessageValidationCause.InvalidEncoding
+
+    var invalidProofMessage = validMessage
+    invalidProofMessage.payload.add(byte(1))
+    let invalidProofCause = await rln.validateMessageDetailed(invalidProofMessage)
+    check invalidProofCause == MessageValidationCause.InvalidProof
+
+    let proofMetadata = validProof.extractMetadata().valueOr:
+      raiseAssert $error
+    discard rln.updateLog(validProof.epoch, proofMetadata)
+    let replayCause = await rln.validateMessageDetailed(validMessage)
+    check replayCause == MessageValidationCause.Spam
+
   asyncTest "multiple senders with same external nullifier":
     let index1 = MembershipIndex(5)
     let rlnConf1 = getWakuRlnConfig(manager = manager, index = index1)

@@ -47,9 +47,9 @@ proc stop*(rlnPeer: Rln) {.async: (raises: [Exception]).} =
   RequestGenerateRlnProof.clearProvider(rlnPeer.brokerCtx)
   await rlnPeer.groupManager.stop()
 
-proc validateMessage*(
+proc validateMessageDetailed*(
     rlnPeer: Rln, msg: WakuMessage
-): Future[MessageValidationResult] {.async.} =
+): Future[MessageValidationCause] {.async.} =
   ## validate the supplied `msg` based on the waku-rln-relay routing protocol i.e.,
   ## the `msg`'s epoch is within MaxEpochGap of the current epoch
   ## the `msg` has valid rate limit proof
@@ -58,7 +58,7 @@ proc validateMessage*(
   ## if `timeOption` is supplied, then the current epoch is calculated based on that
 
   let proof = RateLimitProof.init(msg.proof).valueOr:
-    return MessageValidationResult.Invalid
+    return MessageValidationCause.InvalidEncoding
 
   # track message count for metrics
   logos_delivery_rln_messages_total.inc()
@@ -78,7 +78,7 @@ proc validateMessage*(
       maxTimestampGap = rlnPeer.rlnMaxTimestampGap,
       contentTopic = msg.contentTopic
     logos_delivery_rln_invalid_messages_total.inc(labelValues = ["invalid_timestamp"])
-    return MessageValidationResult.Invalid
+    return MessageValidationCause.InvalidTimestamp
 
   let computedEpoch = rlnPeer.calcEpoch(messageTime)
   if proof.epoch != computedEpoch:
@@ -87,7 +87,7 @@ proc validateMessage*(
       computedEpoch = fromEpoch(computedEpoch),
       contentTopic = msg.contentTopic
     logos_delivery_rln_invalid_messages_total.inc(labelValues = ["timestamp_mismatch"])
-    return MessageValidationResult.Invalid
+    return MessageValidationCause.TimestampMismatch
 
   let rootValidationRes = await rlnPeer.groupManager.validateRoot(proof.merkleRoot)
   if not rootValidationRes:
@@ -96,7 +96,7 @@ proc validateMessage*(
       validRoots = rlnPeer.groupManager.validRoots.mapIt(it.inHex()),
       contentTopic = msg.contentTopic
     logos_delivery_rln_invalid_messages_total.inc(labelValues = ["invalid_root"])
-    return MessageValidationResult.Invalid
+    return MessageValidationCause.StaleRoot
 
   # verify the proof
   let
@@ -113,19 +113,19 @@ proc validateMessage*(
     logos_delivery_rln_errors_total.inc(labelValues = ["proof_verification"])
     warn "invalid message: proof verification failed",
       payloadLen = msg.payload.len, contentTopic = msg.contentTopic
-    return MessageValidationResult.Invalid
+    return MessageValidationCause.ProofVerificationError
 
   if not proofVerificationRes.value():
     # invalid proof
     warn "invalid message: invalid proof",
       payloadLen = msg.payload.len, contentTopic = msg.contentTopic
     logos_delivery_rln_invalid_messages_total.inc(labelValues = ["invalid_proof"])
-    return MessageValidationResult.Invalid
+    return MessageValidationCause.InvalidProof
 
   # check if double messaging has happened
   let proofMetadata = proof.extractMetadata().valueOr:
     logos_delivery_rln_errors_total.inc(labelValues = ["proof_metadata_extraction"])
-    return MessageValidationResult.Invalid
+    return MessageValidationCause.ProofMetadataError
 
   let msgEpoch = proof.epoch
   let hasDup = rlnPeer.hasDuplicate(msgEpoch, proofMetadata)
@@ -135,12 +135,24 @@ proc validateMessage*(
     trace "invalid message: message is spam",
       payloadLen = msg.payload.len, contentTopic = msg.contentTopic
     logos_delivery_rln_spam_messages_total.inc()
-    return MessageValidationResult.Spam
+    return MessageValidationCause.Spam
 
   trace "message is valid",
     payloadLen = msg.payload.len, contentTopic = msg.contentTopic
   # Metric increment moved to validator to include shard label
-  return MessageValidationResult.Valid
+  return MessageValidationCause.Valid
+
+proc validateMessage*(
+    rlnPeer: Rln, msg: WakuMessage
+): Future[MessageValidationResult] {.async.} =
+  let cause = await rlnPeer.validateMessageDetailed(msg)
+  case cause
+  of MessageValidationCause.Valid:
+    return MessageValidationResult.Valid
+  of MessageValidationCause.Spam:
+    return MessageValidationResult.Spam
+  else:
+    return MessageValidationResult.Invalid
 
 proc validateMessageAndUpdateLog*(
     rlnPeer: Rln, msg: WakuMessage
