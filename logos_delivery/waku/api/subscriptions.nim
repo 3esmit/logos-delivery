@@ -19,6 +19,22 @@ proc unsubscribe*(self: Waku, contentTopic: ContentTopic): Result[void, string] 
   ## Unsubscribes from `contentTopic`, resolving its shard via autosharding.
   return self.node.subscriptionManager.unsubscribe(contentTopic)
 
+proc subscribeChannel*(self: Waku, contentTopic: ContentTopic): Result[void, string] =
+  ## Acquires one reliable-channel-owned lease for `contentTopic`.
+  return self.node.subscriptionManager.subscribeChannel(contentTopic)
+
+proc unsubscribeChannel*(self: Waku, contentTopic: ContentTopic): Result[void, string] =
+  ## Releases one reliable-channel-owned lease for `contentTopic`.
+  return self.node.subscriptionManager.unsubscribeChannel(contentTopic)
+
+proc subscribeSend*(self: Waku, contentTopic: ContentTopic): Result[void, string] =
+  ## Acquires one delivery-task-owned lease for `contentTopic`.
+  return self.node.subscriptionManager.subscribeSend(contentTopic)
+
+proc unsubscribeSend*(self: Waku, contentTopic: ContentTopic): Result[void, string] =
+  ## Releases one delivery-task-owned lease for `contentTopic`.
+  return self.node.subscriptionManager.unsubscribeSend(contentTopic)
+
 proc isSubscribed*(self: Waku, contentTopic: ContentTopic): Result[bool, string] =
   ## True if the node already subscribes to `contentTopic`.
   return self.node.subscriptionManager.isSubscribed(contentTopic)

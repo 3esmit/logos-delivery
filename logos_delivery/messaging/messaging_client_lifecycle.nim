@@ -42,6 +42,52 @@ proc start*(self: MessagingClient): Result[void, string] =
     MessagingSend.clearProvider(self.brokerCtx)
     return err(error)
 
+  MessagingSubscribeChannel.setProvider(
+    self.brokerCtx,
+    proc(contentTopic: ContentTopic): Result[void, string] =
+      self.waku.subscribeChannel(contentTopic),
+  ).isOkOr:
+    MessagingUnsubscribe.clearProvider(self.brokerCtx)
+    MessagingSubscribe.clearProvider(self.brokerCtx)
+    MessagingSend.clearProvider(self.brokerCtx)
+    return err(error)
+
+  MessagingUnsubscribeChannel.setProvider(
+    self.brokerCtx,
+    proc(contentTopic: ContentTopic): Result[void, string] =
+      self.waku.unsubscribeChannel(contentTopic),
+  ).isOkOr:
+    MessagingSubscribeChannel.clearProvider(self.brokerCtx)
+    MessagingUnsubscribe.clearProvider(self.brokerCtx)
+    MessagingSubscribe.clearProvider(self.brokerCtx)
+    MessagingSend.clearProvider(self.brokerCtx)
+    return err(error)
+
+  MessagingSubscribeSend.setProvider(
+    self.brokerCtx,
+    proc(contentTopic: ContentTopic): Result[void, string] =
+      self.waku.subscribeSend(contentTopic),
+  ).isOkOr:
+    MessagingUnsubscribeChannel.clearProvider(self.brokerCtx)
+    MessagingSubscribeChannel.clearProvider(self.brokerCtx)
+    MessagingUnsubscribe.clearProvider(self.brokerCtx)
+    MessagingSubscribe.clearProvider(self.brokerCtx)
+    MessagingSend.clearProvider(self.brokerCtx)
+    return err(error)
+
+  MessagingUnsubscribeSend.setProvider(
+    self.brokerCtx,
+    proc(contentTopic: ContentTopic): Result[void, string] =
+      self.waku.unsubscribeSend(contentTopic),
+  ).isOkOr:
+    MessagingSubscribeSend.clearProvider(self.brokerCtx)
+    MessagingUnsubscribeChannel.clearProvider(self.brokerCtx)
+    MessagingSubscribeChannel.clearProvider(self.brokerCtx)
+    MessagingUnsubscribe.clearProvider(self.brokerCtx)
+    MessagingSubscribe.clearProvider(self.brokerCtx)
+    MessagingSend.clearProvider(self.brokerCtx)
+    return err(error)
+
   self.recvService.startRecvService()
   self.sendService.startSendService()
   self.started = true
@@ -53,6 +99,10 @@ proc stop*(self: MessagingClient) {.async.} =
   MessagingSend.clearProvider(self.brokerCtx)
   MessagingSubscribe.clearProvider(self.brokerCtx)
   MessagingUnsubscribe.clearProvider(self.brokerCtx)
+  MessagingSubscribeChannel.clearProvider(self.brokerCtx)
+  MessagingUnsubscribeChannel.clearProvider(self.brokerCtx)
+  MessagingSubscribeSend.clearProvider(self.brokerCtx)
+  MessagingUnsubscribeSend.clearProvider(self.brokerCtx)
   await self.sendService.stopSendService()
   await self.recvService.stopRecvService()
   self.started = false

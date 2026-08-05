@@ -38,6 +38,7 @@ type DeliveryTask* = ref object
     ## waits for epoch capacity.
   propagateEventEmitted*: bool
   errorDesc*: string
+  sendSubscriptionAcquired*: bool
 
 proc new*(
     T: typedesc[DeliveryTask],

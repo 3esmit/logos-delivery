@@ -230,8 +230,31 @@ proc reportTaskResult(self: SendService, task: DeliveryTask) =
       "Unable to send within retry time window",
     )
 
+proc releaseSendLease(self: SendService, task: DeliveryTask) =
+  if not task.sendSubscriptionAcquired:
+    return
+  self.waku.unsubscribeSend(task.msg.contentTopic).isOkOr:
+    warn "SendService: failed to release content-topic lease",
+      contentTopic = task.msg.contentTopic, error = error
+  task.sendSubscriptionAcquired = false
+
+proc releaseLeasesForRemovedTasks(self: SendService) =
+  ## Release one send lease for every task that the cleanup pass will remove.
+  for task in self.taskCache:
+    let terminal =
+      task.state == DeliveryState.SuccessfullyValidated or
+      task.state == DeliveryState.FailedToDeliver or
+      (task.state == DeliveryState.SuccessfullyPropagated and
+        (task.isEphemeral() or not self.checkStoreForMessages)) or
+      (task.firstPropagatedTime.isSome() and
+        task.state != DeliveryState.SuccessfullyValidated and
+        task.propagationAge() > MaxTimeInCache)
+    if terminal:
+      self.releaseSendLease(task)
+
 proc evaluateAndCleanUp(self: SendService) =
   self.taskCache.forEach(self.reportTaskResult(it))
+  self.releaseLeasesForRemovedTasks()
   self.taskCache.keepItIf(
     it.state != DeliveryState.SuccessfullyValidated and
       it.state != DeliveryState.FailedToDeliver
@@ -324,6 +347,9 @@ proc startSendService*(self: SendService) =
 proc stopSendService*(self: SendService) {.async.} =
   if not self.serviceLoopHandle.isNil():
     await self.serviceLoopHandle.cancelAndWait()
+  for task in self.taskCache:
+    self.releaseSendLease(task)
+  self.taskCache.setLen(0)
 
 proc send*(self: SendService, task: DeliveryTask) {.async.} =
   assert(not task.isNil(), "task for send must not be nil")
@@ -331,15 +357,19 @@ proc send*(self: SendService, task: DeliveryTask) {.async.} =
   info "SendService.send: processing delivery task",
     requestId = task.requestId, msgHash = task.msgHash.to0xHex()
 
-  self.waku.subscribe(task.msg.contentTopic).isOkOr:
-    error "SendService.send: failed to subscribe to content topic",
-      contentTopic = task.msg.contentTopic, error = error
+  self.waku.subscribeSend(task.msg.contentTopic).isOkOr:
+    task.state = DeliveryState.FailedToDeliver
+    task.errorDesc = "Failed to acquire content-topic lease: " & error
+    reportTaskResult(self, task)
+    return
+  task.sendSubscriptionAcquired = true
 
   if not (await self.admitOnce(task)):
     if not self.canParkForRateLimit():
       task.state = DeliveryState.FailedToDeliver
       task.errorDesc = RateLimitQueueFullError
       reportTaskResult(self, task)
+      self.releaseSendLease(task)
       return
 
     info "SendService.send: parking task for a later round",
@@ -356,3 +386,5 @@ proc send*(self: SendService, task: DeliveryTask) {.async.} =
   reportTaskResult(self, task)
   if task.state != DeliveryState.FailedToDeliver:
     self.addTask(task)
+  else:
+    self.releaseSendLease(task)

@@ -36,16 +36,18 @@ proc createReliableChannel*(
 ): Result[ChannelId, string] =
   ## Encryption and egress providers must be installed (or `setNoopEncryption()`)
   ## before traffic flows on the channel.
-  ## Subscribes to `contentTopic`; without a `MessagingSubscribe` provider the
+  ## Subscribes to `contentTopic`; without a `MessagingSubscribeChannel` provider the
   ## subscription is deferred to `ReliableChannelManager.start`.
   if self.channels.hasKey(channelId):
     return err("channel already exists: " & channelId)
 
   # Subscribe before constructing so a failure leaks no listeners.
-  if MessagingSubscribe.isProvided(self.brokerCtx):
-    MessagingSubscribe.request(self.brokerCtx, contentTopic).isOkOr:
+  var subscriptionDeferred = false
+  if MessagingSubscribeChannel.isProvided(self.brokerCtx):
+    MessagingSubscribeChannel.request(self.brokerCtx, contentTopic).isOkOr:
       return err("failed to subscribe to content topic: " & error)
   else:
+    subscriptionDeferred = true
     debug "no MessagingSubscribe provider, deferring content topic subscription",
       channelId = channelId, contentTopic = contentTopic
 
@@ -71,9 +73,12 @@ proc createReliableChannel*(
     sdsConfig = sdsConfig,
     brokerCtx = self.brokerCtx,
   ).valueOr:
+    if not subscriptionDeferred and MessagingUnsubscribeChannel.isProvided(self.brokerCtx):
+      discard MessagingUnsubscribeChannel.request(self.brokerCtx, contentTopic)
     return err("failed to create reliable channel: " & error)
 
   self.channels[channelId] = chn
+  self.deferredChannelSubscriptions[channelId] = subscriptionDeferred
   return ok(channelId)
 
 proc channelExists*(self: ReliableChannelManager, channelId: ChannelId): bool =
@@ -86,15 +91,18 @@ proc closeChannel*(
     self: ReliableChannelManager, channelId: ChannelId
 ): Future[Result[void, string]] {.async: (raises: []).} =
   ## Stops the channel's SDS loops and releases the channel. Persisted SDS
-  ## state survives, so re-creating the channel restores it. The content-topic
-  ## subscription remains in place until an application removes it or the node
-  ## stops: the subscription manager cannot distinguish channel-owned interest
-  ## from an application's own subscription. Owner-aware cleanup is tracked in
-  ## #19.
+  ## state survives, so re-creating the channel restores it.
   let chn = self.channels.getOrDefault(channelId)
   if chn.isNil():
     return err("unknown channel: " & channelId)
   self.channels.del(channelId)
+  let subscriptionDeferred = self.deferredChannelSubscriptions.getOrDefault(channelId, false)
+  self.deferredChannelSubscriptions.del(channelId)
   await chn.stop()
+
+  if not subscriptionDeferred and MessagingUnsubscribeChannel.isProvided(self.brokerCtx):
+    MessagingUnsubscribeChannel.request(self.brokerCtx, chn.getContentTopic()).isOkOr:
+      warn "failed to unsubscribe closed channel's content topic",
+        channelId = channelId, contentTopic = chn.getContentTopic(), error = error
 
   return ok()

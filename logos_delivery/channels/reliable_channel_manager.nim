@@ -25,6 +25,7 @@ export reliable_channel, channels_conf
 
 type ReliableChannelManager* = ref object ## Implements `ReliableChannelApi`.
   channels*: Table[ChannelId, ReliableChannel] ## read by `channels/api.nim`
+  deferredChannelSubscriptions*: Table[ChannelId, bool]
   conf*: ReliableChannelManagerConf
   brokerCtx*: BrokerContext
 
@@ -41,6 +42,7 @@ proc new*(
   return ok(
     T(
       channels: initTable[ChannelId, ReliableChannel](),
+      deferredChannelSubscriptions: initTable[ChannelId, bool](),
       conf: conf,
       brokerCtx: brokerCtx,
     )
@@ -57,18 +59,33 @@ proc start*(self: ReliableChannelManager): Result[void, string] =
   ## installed its own encryption before start keeps it.
   setNoopEncryption()
 
-  # Subscribe channels created before the MessagingSubscribe provider existed.
-  if MessagingSubscribe.isProvided(self.brokerCtx):
-    for chn in self.channels.values:
-      MessagingSubscribe.request(self.brokerCtx, chn.getContentTopic()).isOkOr:
+  # Subscribe channels created before the MessagingSubscribeChannel provider existed.
+  if MessagingSubscribeChannel.isProvided(self.brokerCtx):
+    var acquired: seq[(ChannelId, ContentTopic)]
+    for channelId, deferred in self.deferredChannelSubscriptions.mpairs:
+      if not deferred:
+        continue
+      let chn = self.channels.getOrDefault(channelId)
+      if chn.isNil():
+        continue
+      MessagingSubscribeChannel.request(self.brokerCtx, chn.getContentTopic()).isOkOr:
+        for item in acquired:
+          discard MessagingUnsubscribeChannel.request(self.brokerCtx, item[1])
+          self.deferredChannelSubscriptions[item[0]] = true
         return err("failed to subscribe channel's content topic: " & error)
+      deferred = false
+      acquired.add((channelId, chn.getContentTopic()))
   ok()
 
 proc stop*(self: ReliableChannelManager) {.async.} =
   ## Stops every channel's SDS background loops. Persisted state survives.
-  for chn in self.channels.values:
+  for channelId, chn in self.channels.pairs:
     await chn.stop()
+    if not self.deferredChannelSubscriptions.getOrDefault(channelId, false) and
+        MessagingUnsubscribeChannel.isProvided(self.brokerCtx):
+      discard MessagingUnsubscribeChannel.request(self.brokerCtx, chn.getContentTopic())
   self.channels.clear()
+  self.deferredChannelSubscriptions.clear()
 
 ## Inbound messages are not handed to the manager by direct call. Each
 ## `ReliableChannel` installs its own `MessageReceivedEvent` listener

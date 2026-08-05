@@ -57,6 +57,7 @@ suite "Reliable Channel - lifecycle":
 
     var subscribed: seq[ContentTopic]
     var unsubscribed: seq[ContentTopic]
+    var channelUnsubscribed: seq[ContentTopic]
     var manager: ReliableChannelManager
     lockNewGlobalBrokerContext:
       let brokerCtx = globalBrokerContext()
@@ -82,6 +83,23 @@ suite "Reliable Channel - lifecycle":
         )
         .expect("setProvider MessagingUnsubscribe")
 
+      MessagingSubscribeChannel
+        .setProvider(
+          brokerCtx,
+          proc(contentTopic: ContentTopic): Result[void, string] =
+            subscribed.add(contentTopic)
+            ok(),
+        )
+        .expect("setProvider MessagingSubscribeChannel")
+      MessagingUnsubscribeChannel
+        .setProvider(
+          brokerCtx,
+          proc(contentTopic: ContentTopic): Result[void, string] =
+            channelUnsubscribed.add(contentTopic)
+            ok(),
+        )
+        .expect("setProvider MessagingUnsubscribeChannel")
+
       MessagingSubscribe.request(brokerCtx, topic).expect("application subscribe")
 
       discard manager
@@ -92,6 +110,7 @@ suite "Reliable Channel - lifecycle":
 
       (await manager.closeChannel(channelId)).expect("closeChannel")
       check unsubscribed.len == 0
+      check channelUnsubscribed == @[topic]
 
   asyncTest "new rejects listener registration failures":
     const
