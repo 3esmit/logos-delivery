@@ -1414,6 +1414,11 @@ suite "Reliable Channel - content topic subscription":
         .expect("createReliableChannel post-start")
       check waku.waku.isSubscribed(postStartTopic).expect("isSubscribed")
 
+      ## An application may share the same topic with a reliable channel.
+      (await waku.messagingClient.subscribe(postStartTopic)).expect(
+        "subscribe post-start application"
+      )
+
       (await manager.closeChannel(postStartChannelId)).expect("closeChannel post-start")
       ## The messaging subscription can also belong to application traffic, so
       ## channel close must not remove it without owner-aware accounting.
@@ -1421,6 +1426,9 @@ suite "Reliable Channel - content topic subscription":
       waku.messagingClient.unsubscribe(postStartTopic).expect("unsubscribe post-start")
       check not waku.waku.isSubscribed(postStartTopic).expect("isSubscribed")
 
+      (await waku.messagingClient.subscribe(preStartTopic)).expect(
+        "subscribe pre-start application"
+      )
       (await manager.closeChannel(preStartChannelId)).expect("closeChannel pre-start")
       check waku.waku.isSubscribed(preStartTopic).expect("isSubscribed")
       waku.messagingClient.unsubscribe(preStartTopic).expect("unsubscribe pre-start")

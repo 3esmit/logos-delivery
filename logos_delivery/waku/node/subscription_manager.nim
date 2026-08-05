@@ -122,6 +122,71 @@ proc new*(T: type SubscriptionManager, node: WakuNode): T =
     edgeFilterWakeup: newAsyncEvent(),
   )
 
+proc newShardSubscription(directShardSub = false): ShardSubscription =
+  ShardSubscription(
+    contentTopics: initHashSet[ContentTopic](),
+    applicationContentTopics: initHashSet[ContentTopic](),
+    channelContentTopics: initTable[ContentTopic, int](),
+    sendContentTopics: initTable[ContentTopic, int](),
+    directShardSub: directShardSub,
+  )
+
+func hasNonApplicationLease(
+    entry: ShardSubscription, contentTopic: ContentTopic
+): bool =
+  entry.channelContentTopics.getOrDefault(contentTopic, 0) > 0 or
+    entry.sendContentTopics.getOrDefault(contentTopic, 0) > 0
+
+proc retainApplication(entry: var ShardSubscription, contentTopic: ContentTopic): bool =
+  if contentTopic in entry.applicationContentTopics:
+    return false
+  entry.applicationContentTopics.incl(contentTopic)
+  if contentTopic notin entry.contentTopics:
+    entry.contentTopics.incl(contentTopic)
+    return true
+  false
+
+proc releaseApplication(
+    entry: var ShardSubscription, contentTopic: ContentTopic
+): bool =
+  if contentTopic notin entry.applicationContentTopics:
+    return false
+  entry.applicationContentTopics.excl(contentTopic)
+  if not entry.hasNonApplicationLease(contentTopic):
+    entry.contentTopics.excl(contentTopic)
+    return true
+  false
+
+proc retainLease(
+    entry: var ShardSubscription,
+    leases: var Table[ContentTopic, int],
+    contentTopic: ContentTopic,
+): bool =
+  let count = leases.getOrDefault(contentTopic, 0)
+  leases[contentTopic] = count + 1
+  if count == 0 and contentTopic notin entry.contentTopics:
+    entry.contentTopics.incl(contentTopic)
+    return true
+  false
+
+proc releaseLease(
+    entry: var ShardSubscription,
+    leases: var Table[ContentTopic, int],
+    contentTopic: ContentTopic,
+): bool =
+  let count = leases.getOrDefault(contentTopic, 0)
+  if count == 0:
+    return false
+  if count == 1:
+    leases.del(contentTopic)
+  else:
+    leases[contentTopic] = count - 1
+  if count == 1 and contentTopic notin entry.applicationContentTopics and
+      not entry.hasNonApplicationLease(contentTopic):
+    entry.contentTopics.excl(contentTopic)
+    return true
+  false
+
 func wanted(entry: ShardSubscription): bool =
   ## True if the shard has content-topic interest or a direct subscription.
   return entry.contentTopics.len > 0 or entry.directShardSub
@@ -173,9 +238,7 @@ proc subscribeShard*(
       entry.directShardSub = true
       added = true
   do:
-    self.shards[shard] = ShardSubscription(
-      contentTopics: initHashSet[ContentTopic](), directShardSub: true
-    )
+    self.shards[shard] = newShardSubscription(directShardSub = true)
     added = true
   if added:
     self.edgeFilterWakeup.fire()
@@ -211,12 +274,10 @@ proc subscribe*(
   ## Adds content-topic interest on the shard and joins the relay mesh.
   var added = false
   self.shards.withValue(shard, entry):
-    if contentTopic notin entry.contentTopics:
-      entry.contentTopics.incl(contentTopic)
-      added = true
+    added = entry[].retainApplication(contentTopic)
   do:
-    var entry = ShardSubscription(contentTopics: initHashSet[ContentTopic]())
-    entry.contentTopics.incl(contentTopic)
+    var entry = newShardSubscription()
+    discard entry.retainApplication(contentTopic)
     self.shards[shard] = entry
     added = true
   if added:
@@ -232,10 +293,8 @@ proc unsubscribe*(
   var removed = false
   var shardEmpty = false
   self.shards.withValue(shard, entry):
-    if contentTopic in entry.contentTopics:
-      entry.contentTopics.excl(contentTopic)
-      removed = true
-      shardEmpty = not entry[].wanted()
+    removed = entry[].releaseApplication(contentTopic)
+    shardEmpty = removed and not entry[].wanted()
   if removed:
     self.edgeFilterWakeup.fire()
     if shardEmpty:
@@ -249,6 +308,80 @@ proc subscribe*(self: SubscriptionManager, topic: ContentTopic): Result[void, st
   let shard = ?self.getShardForContentTopic(topic)
   return self.subscribe(shard, topic)
 
+proc subscribeChannel*(
+    self: SubscriptionManager, topic: ContentTopic
+): Result[void, string] =
+  ## Acquires one channel-owned lease for a content topic.
+  let shard = ?self.getShardForContentTopic(topic)
+  var added = false
+  self.shards.withValue(shard, entry):
+    added = entry[].retainLease(entry[].channelContentTopics, topic)
+  do:
+    var entry = newShardSubscription()
+    discard entry.retainLease(entry.channelContentTopics, topic)
+    self.shards[shard] = entry
+    added = true
+  if added:
+    self.edgeFilterWakeup.fire()
+  if not isNil(self.node.wakuRelay):
+    discard self.node.doRelaySubscribe(shard)
+  ok()
+
+proc unsubscribeChannel*(
+    self: SubscriptionManager, topic: ContentTopic
+): Result[void, string] =
+  ## Releases one channel-owned lease for a content topic.
+  let shard = ?self.getShardForContentTopic(topic)
+  var removed = false
+  var shardEmpty = false
+  self.shards.withValue(shard, entry):
+    removed = entry[].releaseLease(entry[].channelContentTopics, topic)
+    shardEmpty = removed and not entry[].wanted()
+  if removed:
+    self.edgeFilterWakeup.fire()
+    if shardEmpty:
+      self.shards.del(shard)
+      if not isNil(self.node.wakuRelay):
+        discard self.node.doRelayUnsubscribe(shard)
+  ok()
+
+proc subscribeSend*(
+    self: SubscriptionManager, topic: ContentTopic
+): Result[void, string] =
+  ## Acquires one send-owned lease for a delivery task.
+  let shard = ?self.getShardForContentTopic(topic)
+  var added = false
+  self.shards.withValue(shard, entry):
+    added = entry[].retainLease(entry[].sendContentTopics, topic)
+  do:
+    var entry = newShardSubscription()
+    discard entry.retainLease(entry.sendContentTopics, topic)
+    self.shards[shard] = entry
+    added = true
+  if added:
+    self.edgeFilterWakeup.fire()
+  if not isNil(self.node.wakuRelay):
+    discard self.node.doRelaySubscribe(shard)
+  ok()
+
+proc unsubscribeSend*(
+    self: SubscriptionManager, topic: ContentTopic
+): Result[void, string] =
+  ## Releases one send-owned lease for a delivery task.
+  let shard = ?self.getShardForContentTopic(topic)
+  var removed = false
+  var shardEmpty = false
+  self.shards.withValue(shard, entry):
+    removed = entry[].releaseLease(entry[].sendContentTopics, topic)
+    shardEmpty = removed and not entry[].wanted()
+  if removed:
+    self.edgeFilterWakeup.fire()
+    if shardEmpty:
+      self.shards.del(shard)
+      if not isNil(self.node.wakuRelay):
+        discard self.node.doRelayUnsubscribe(shard)
+  ok()
+
 proc unsubscribe*(
     self: SubscriptionManager, topic: ContentTopic
 ): Result[void, string] =
@@ -259,12 +392,18 @@ proc unsubscribe*(
 proc unsubscribeAll*(
     self: SubscriptionManager, shard: PubsubTopic
 ): Result[void, string] =
-  ## Drops every content topic on the shard, then the direct subscription.
-  var snapshot: seq[ContentTopic]
-  self.shards.withValue(shard, sub):
-    snapshot = toSeq(sub.contentTopics)
-  for contentTopic in snapshot:
-    ?self.unsubscribe(shard, contentTopic)
+  ## Drops every content-topic owner on the shard, then the direct subscription.
+  ## This is an explicit destructive reset used by relay teardown, so it also
+  ## clears channel and send leases that no longer have a live node to own them.
+  var removed = false
+  self.shards.withValue(shard, entry):
+    removed = entry[].contentTopics.len > 0
+    entry[].contentTopics.clear()
+    entry[].applicationContentTopics.clear()
+    entry[].channelContentTopics.clear()
+    entry[].sendContentTopics.clear()
+  if removed:
+    self.edgeFilterWakeup.fire()
   return self.unsubscribeShard(shard)
 
 proc isSubscribed*(

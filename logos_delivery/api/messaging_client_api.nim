@@ -23,3 +23,17 @@ RequestBroker(sync):
 
 RequestBroker(sync):
   proc MessagingUnsubscribe(contentTopic: ContentTopic): Result[void, string]
+
+# Explicit ownership requests keep reliable-channel and delivery-task leases
+# separate from the application's idempotent subscribe/unsubscribe API.
+RequestBroker(sync):
+  proc MessagingSubscribeChannel(contentTopic: ContentTopic): Result[void, string]
+
+RequestBroker(sync):
+  proc MessagingUnsubscribeChannel(contentTopic: ContentTopic): Result[void, string]
+
+RequestBroker(sync):
+  proc MessagingSubscribeSend(contentTopic: ContentTopic): Result[void, string]
+
+RequestBroker(sync):
+  proc MessagingUnsubscribeSend(contentTopic: ContentTopic): Result[void, string]
