@@ -17,7 +17,7 @@ const RequiredNimbleVersion = "0.22.3"
 
 ### Dependencies
 requires "nim >= 2.2.4",
-  "chronos >= 4.2.0",
+  "chronos >= 4.2.0 & < 4.4.0",
   "taskpools",
   # Logging & Configuration
   "chronicles",
@@ -112,7 +112,7 @@ proc buildLibrary(lib_name: string, srcDir = "./", params = "", `type` = "static
 
   if `type` == "static":
     exec "nim c" & " --out:build/" & lib_name &
-      " --threads:on --app:staticlib --opt:speed --noMain --mm:refc --header -d:metrics --nimMainPrefix:" & mainPrefix & " --skipParentCfg:on -d:discv5_protocol_id=d5waku " &
+      " --threads:on --app:staticlib --opt:speed --noMain --mm:refc --header -d:metrics --nimMainPrefix:" & mainPrefix & " --skipParentCfg:off -d:discv5_protocol_id=d5waku " &
       getMyCPU() & getNimParams() & srcDir & "/" & srcFile
   else:
     # -Bsymbolic binds the library's references to its own symbols at link
