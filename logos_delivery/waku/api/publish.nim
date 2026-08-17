@@ -96,7 +96,8 @@ func isRlnRejection*(error: ErrorStatus): bool =
 func isStaleRlnProof*(error: ErrorStatus): bool =
   ## True only for the explicit stale-proof signal emitted by the validator.
   ## Other RLN errors must not clear a message's proof or admission state.
-  return error.code == LightPushErrorCode.OUT_OF_RLN_PROOF and
+  return
+    error.code == LightPushErrorCode.OUT_OF_RLN_PROOF and
     error.desc.get("").contains(RlnProofRefreshScheduledMsg)
 
 proc onRlnProofRejected*(self: Waku) =
