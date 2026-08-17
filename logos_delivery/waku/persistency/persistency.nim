@@ -40,7 +40,7 @@
 
 {.push raises: [].}
 
-import std/[os, sequtils, tables]
+import std/[locks, os, sequtils, tables]
 import chronos, chronicles, results
 import brokers/[event_broker, request_broker, broker_context]
 import ./[types, keys, payload, backend_comm, backend_thread]
