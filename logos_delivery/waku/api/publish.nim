@@ -93,6 +93,12 @@ func isRlnRejection*(error: ErrorStatus): bool =
       error.desc.get("").contains(RlnValidatorErrorMsg)
     )
 
+func isStaleRlnProof*(error: ErrorStatus): bool =
+  ## True only for the explicit stale-proof signal emitted by the validator.
+  ## Other RLN errors must not clear a message's proof or admission state.
+  return error.code == LightPushErrorCode.OUT_OF_RLN_PROOF and
+    error.desc.get("").contains(RlnProofRefreshScheduledMsg)
+
 proc onRlnProofRejected*(self: Waku) =
   ## Called when a publish was rejected as RLN-invalid. Starts refetching the
   ## merkle path in the background, so the next proof generated for the message
