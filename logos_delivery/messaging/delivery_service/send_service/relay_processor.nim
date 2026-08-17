@@ -64,10 +64,8 @@ method sendImpl*(self: RelaySendProcessor, task: DeliveryTask) {.async.} =
     let errorMessage = error.desc.get($error.code)
     error "Failed to publish message with relay",
       request = task.requestId, msgHash = task.msgHash.to0xHex(), error = errorMessage
-    if error.isStaleRlnProof():
-      self.waku.onRlnProofRejected()
-      task.retryWithFreshRlnProof()
-      task.state = DeliveryState.NextRoundRetry
+    if error.isRlnRejection():
+      task.parkForRlnProofRefresh(self.waku)
       return
 
     if error.code != LightPushErrorCode.NO_PEERS_TO_RELAY:

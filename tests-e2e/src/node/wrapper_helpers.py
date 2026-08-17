@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import base64
 import json
+import re
 import threading
 import time
+import uuid
 from typing import Optional
 from src.libs.common import to_base64
 
@@ -11,6 +14,7 @@ DEFAULT_PAYLOAD = to_base64("test payload")
 EVENT_PROPAGATED = "message_propagated"
 EVENT_SENT = "message_sent"
 EVENT_ERROR = "message_error"
+EVENT_CHANNEL_RECEIVED = "channel_message_received"
 
 # MaxTimeInCache from send_service.nim.
 MAX_TIME_IN_CACHE_S = 60.0
@@ -181,9 +185,9 @@ def get_node_multiaddr(node) -> str:
     list), this fails loudly instead of silently passing a malformed string
     downstream to staticnodes / add_peers.
     """
-    result = node.get_node_info_raw("MyMultiaddresses")
+    result = node.get_node_info("MyMultiaddresses")
     if result.is_err():
-        raise RuntimeError(f"get_node_info_raw failed: {result.err()}")
+        raise RuntimeError(f"get_node_info failed: {result.err()}")
 
     addr = result.ok_value.strip()
     if not addr or not addr.startswith("/"):
@@ -193,6 +197,62 @@ def get_node_multiaddr(node) -> str:
         raise AssertionError(f"Expected a single multiaddr from MyMultiaddresses, got multiple: {addr!r}")
 
     return addr
+
+
+# Matches the /tcp/<port>/ segment in a libp2p multiaddr.
+TCP_PORT_RE = re.compile(r"/tcp/(\d+)/")
+
+
+def get_node_tcp_port(node) -> int:
+    """Return the TCP port the node advertises in its multiaddr."""
+    multiaddr = get_node_multiaddr(node)
+    match = TCP_PORT_RE.search(multiaddr)
+    if not match:
+        raise RuntimeError(f"multiaddr missing /tcp/<port>/ segment: {multiaddr!r}")
+    return int(match.group(1))
+
+
+def get_node_bound_ports(node) -> dict:
+    """Return the MyBoundPorts debug info .
+
+    Keys: tcp, webSocket, quic, rest, discv5Udp, metrics. A value of 0 means the
+    service is disabled or did not bind.
+    """
+    result = node.get_node_info("MyBoundPorts")
+    if result.is_err():
+        raise RuntimeError(f"MyBoundPorts query failed: {result.err()}")
+    return json.loads(result.ok_value)
+
+
+def enr_udp_port(enr_uri: str) -> int:
+    """Extract the advertised udp port from a text-encoded ENR.
+
+    An ENR is "enr:" + base64url(RLP). Instead of pulling in a full RLP
+    decoder, find the "udp" key in the raw bytes and read the value after it.
+    """
+    if not enr_uri.startswith("enr:"):
+        raise RuntimeError(f"not an ENR URI: {enr_uri!r}")
+    b64 = enr_uri[len("enr:") :]
+    payload = base64.urlsafe_b64decode(b64 + "=" * (-len(b64) % 4))
+
+    key = payload.find(b"\x83udp")  # "udp" encoded as a 3-byte RLP string
+    if key == -1:
+        raise RuntimeError(f"ENR has no udp entry: {enr_uri!r}")
+
+    prefix = payload[key + 4]
+    if prefix < 0x80:  # values < 128 are encoded as a single byte
+        return prefix
+    size = prefix - 0x80  # short string: prefix is 0x80 + length
+    return int.from_bytes(payload[key + 5 : key + 5 + size], "big")
+
+
+def unique_channel_id(prefix: str) -> str:
+    """A per-run channel id.
+
+    SDS state is persisted per channelId and restored on create, so a fixed id
+    leaks one run's causal history into the next.
+    """
+    return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
 def create_message_bindings(**overrides) -> dict:

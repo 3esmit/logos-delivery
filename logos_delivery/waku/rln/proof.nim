@@ -63,6 +63,10 @@ proc toRLNSignal*(wakumessage: WakuMessage): seq[byte] =
 proc generateRLNProofWithNonce(
     rln: Rln, input: seq[byte], senderEpochTime: float64, nonce: Nonce
 ): Future[Result[seq[byte], string]] {.async: (raises: []).} =
+  ## Generates a proof against an already drawn `nonce`. Regenerating for an
+  ## unchanged (input, epoch, nonce) is safe: the revealed share is a function
+  ## of those three, so a regenerated proof reveals the same share and cannot
+  ## read as double-signalling.
   let epoch = rln.calcEpoch(senderEpochTime)
   try:
     let proof = (await rln.groupManager.generateProof(input, epoch, nonce)).valueOr:
@@ -74,6 +78,7 @@ proc generateRLNProofWithNonce(
 proc generateRLNProof*(
     rln: Rln, input: seq[byte], senderEpochTime: float64
 ): Future[Result[seq[byte], string]] {.async: (raises: []).} =
+  ## the one the nonce manager enforces.
   let nonce = rln.nonceManager.getNonce().valueOr:
     return err("could not get new message id to generate an rln proof: " & $error)
   return await rln.generateRLNProofWithNonce(input, senderEpochTime, nonce)
@@ -84,6 +89,11 @@ proc generateRLNProofWithRootRefresh*(
   ## Generates an RLN proof and checks its merkle root against the
   ## acceptable-root window. If the root is stale, invalidates the cache and
   ## regenerates once against a refetched path. Returns the proof bytes.
+  ##
+  ## The regeneration reuses the nonce drawn for the first attempt: only the
+  ## merkle path differs between the two, so drawing again would spend two
+  ## message ids from the epoch budget on a message that is sent once. That
+  ## would drift the budget the rate limit manager accounts for away from the
   let nonce = rln.nonceManager.getNonce().valueOr:
     return err("could not get new message id to generate an rln proof: " & $error)
 

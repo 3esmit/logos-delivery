@@ -64,6 +64,20 @@ ifeq ($(OS), Windows_NT)
 		libnatpmp.a $(HANDLE_OUTPUT)
 	$(call verify_nat_archive_members,$(NAT_TRAVERSAL_NIMBLEDEPS_DIR)/vendor/libnatpmp-upstream/libnatpmp.a,$(NAT_NATPMP_REQUIRED_MEMBERS))
 else
+# Delete the archives that the nimble install hook of nat_traversal already
+# built before nimble copied the package into nimbledeps/pkgs2/.
+#
+# The vendored Makefiles give the archiver only the out-of-date objects ($?).
+# On macOS the archiver is "libtool -static", which makes a new archive and
+# drops all other objects. The file times from the nimble copy can make only
+# some objects out of date. The link then fails with undefined _UPNP_*,
+# _connecthostport, _soapPostSubmit and _addr_is_reserved symbols.
+#
+# When the archive is absent, make expands $? to all objects. On Linux this
+# deletion is safe: "ar crs" merges into an existing archive, and the rule
+# only makes the archive again from the same objects.
+	@rm -f "$(NAT_TRAVERSAL_NIMBLEDEPS_DIR)/vendor/miniupnp/miniupnpc/build/libminiupnpc.a" \
+	       "$(NAT_TRAVERSAL_NIMBLEDEPS_DIR)/vendor/libnatpmp-upstream/libnatpmp.a"
 	+ "$(MAKE)" -C "$(NAT_TRAVERSAL_NIMBLEDEPS_DIR)/vendor/miniupnp/miniupnpc" \
 		CC=$(CC) clean $(HANDLE_OUTPUT)
 	+ "$(MAKE)" -C "$(NAT_TRAVERSAL_NIMBLEDEPS_DIR)/vendor/miniupnp/miniupnpc" \
