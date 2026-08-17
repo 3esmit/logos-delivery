@@ -683,7 +683,9 @@ suite "Reliable Channel - SDS persistence":
       .expect("createReliableChannel")
     discard (await manager.send(channelId, "stop safely".toBytes())).expect("send")
 
-    let persistency = Persistency.instance().expect("persistency initialized")
+    ## The synced Waku layer owns one Persistency instance per node and exposes
+    ## it through the node's broker context.
+    let persistency = waku.waku.persistency
     let job = persistency.openJob("sds").expect("sds job")
     let channelKey = toKey(SdsChannelID(channelId))
     var persisted = false
@@ -700,7 +702,8 @@ suite "Reliable Channel - SDS persistence":
     check:
       not waku.waku.node.started
       not job.running
-      Persistency.instance().isErr()
+      waku.waku.persistency.isNil()
+      GetPersistency.request(waku.waku.brokerCtx).isErr()
 
     (await waku.start()).expect("restart")
     check waku.waku.node.started

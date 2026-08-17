@@ -33,8 +33,10 @@ method sendImpl*(
     await self.waku.lightpushPublishToAny(task.pubsubTopic, task.msg)
   ).valueOr:
     error "LightpushSendProcessor.sendImpl failed", error = error.desc.get($error.code)
-    if error.isRlnRejection():
-      task.parkForRlnProofRefresh(self.waku)
+    if error.isStaleRlnProof():
+      self.waku.onRlnProofRejected()
+      task.retryWithFreshRlnProof()
+      task.state = DeliveryState.NextRoundRetry
       return
 
     case error.code
