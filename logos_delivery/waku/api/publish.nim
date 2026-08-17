@@ -41,15 +41,30 @@ proc relayPushHandler*(self: Waku): PushMessageHandler =
   ## Builds the relay publish handler used by the send pipeline. Caller
   ## ensures relay is mounted. The handler validates and republishes; the
   ## proof is attached by the messaging layer via `attachRlnProof`.
+  return getRelayPushHandler(self.node.wakuRelay)
+
+proc currentRlnEpochQuota*(self: Waku): Opt[tuple[epochIndex, messageLimit: uint64]] =
+  ## RLN's current epoch index and user message limit, read together so the
+  ## pair cannot straddle an epoch boundary.
   if self.node.rln.isNil():
-    return getRelayPushHandler(self.node.wakuRelay)
-  return getRelayPushHandler(self.node.wakuRelay, self.node.rln)
+    return Opt.none(tuple[epochIndex, messageLimit: uint64])
+
+  let limit = self.node.rln.groupManager.userMessageLimit.valueOr:
+    return Opt.none(tuple[epochIndex, messageLimit: uint64])
+
+  return Opt.some((fromEpoch(self.node.rln.getCurrentEpoch()), uint64(limit)))
 
 proc attachRlnProof*(
     self: Waku, message: WakuMessage
 ): Future[Result[WakuMessage, string]] {.async.} =
-  ## A proof-bearing message is returned unchanged so an ordinary delivery
-  ## retry reuses its nonce. Without RLN mounted the message passes through.
+  ## Returns `message` carrying an RLN proof. A message that already has one is
+  ## returned untouched, so retrying a task neither redraws a nonce nor changes
+  ## the bytes. Without RLN mounted the message passes through unproven.
+  ##
+  ## Uses the root-refreshing generator: a message can wait in the send
+  ## service's task cache while the group root moves on chain, so the proof is
+  ## validated against the acceptable-root window and regenerated once against a
+  ## refetched merkle path if it went stale.
   if self.node.rln.isNil() or message.proof.len > 0:
     return ok(message)
 
@@ -63,31 +78,37 @@ proc attachRlnProof*(
 
   return ok(msgWithProof)
 
+func isRlnRejection*(error: ErrorStatus): bool =
+  ## True when a publish failure means "the RLN proof was not accepted", so the
+  ## message is worth retrying with a freshly generated proof rather than being
+  ## failed outright.
+  ##
+  ## OUT_OF_RLN_PROOF is always RLN. INVALID_MESSAGE also covers non-RLN
+  ## rejections (an oversized message, say), so it additionally has to carry the
+  ## validator's error marker — this is the same gate the kernel lightpush path
+  ## applies before scheduling a refresh.
+  return
+    error.code == LightPushErrorCode.OUT_OF_RLN_PROOF or (
+      error.code == LightPushErrorCode.INVALID_MESSAGE and
+      error.desc.get("").contains(RlnValidatorErrorMsg)
+    )
+
 func isStaleRlnProof*(error: ErrorStatus): bool =
-  ## Only a normalized lightpush refresh marker proves retrying can regenerate
-  ## a stale proof. Relay's raw validator marker also covers malformed proofs,
-  ## timestamps, and replays, so it must remain a terminal delivery failure.
+  ## True only for the explicit stale-proof signal emitted by the validator.
+  ## Other RLN errors must not clear a message's proof or admission state.
   return
     error.code == LightPushErrorCode.OUT_OF_RLN_PROOF and
     error.desc.get("").contains(RlnProofRefreshScheduledMsg)
 
 proc onRlnProofRejected*(self: Waku) =
-  ## Start a non-blocking path refresh; the send-service loop owns retrying.
+  ## Called when a publish was rejected as RLN-invalid. Starts refetching the
+  ## merkle path in the background, so the next proof generated for the message
+  ## is built against a fresh one. Non-blocking: the send service's own loop is
+  ## what retries, and it must not stall waiting on an RPC round trip.
   if self.node.rln.isNil():
     return
 
   self.node.rln.groupManager.scheduleMerkleProofRefresh()
-
-proc currentRlnEpochQuota*(self: Waku): Opt[tuple[epochIndex, messageLimit: uint64]] =
-  ## RLN's current epoch index and user message limit, read together so the
-  ## pair cannot straddle an epoch boundary.
-  if self.node.rln.isNil():
-    return Opt.none(tuple[epochIndex, messageLimit: uint64])
-
-  let limit = self.node.rln.groupManager.userMessageLimit.valueOr:
-    return Opt.none(tuple[epochIndex, messageLimit: uint64])
-
-  return Opt.some((fromEpoch(self.node.rln.getCurrentEpoch()), uint64(limit)))
 
 proc lightpushPeerAvailable*(self: Waku, shard: PubsubTopic): bool =
   ## True if a lightpush service peer is available for `shard`.
@@ -97,9 +118,9 @@ proc lightpushPublishToAny*(
     self: Waku, shard: PubsubTopic, message: WakuMessage
 ): Future[WakuLightPushResult] {.async.} =
   ## Selects a lightpush service peer for `shard` and publishes `message`
-  ## through the node's lightpush flow. The send service normally supplies the
-  ## proof, while the node preserves that proof unchanged. Returns
-  ## SERVICE_NOT_AVAILABLE when no peer is available.
+  ## through the node's lightpush flow. With RLN mounted the flow proves
+  ## `message` only if it carries no proof, so an already-proven task reuses its
+  ## nonce. Returns SERVICE_NOT_AVAILABLE when no peer is available.
   let peer = self.node.peerManager.selectPeer(WakuLightPushCodec, Opt.some(shard)).valueOr:
     return lightpushResultServiceUnavailable("no lightpush peer available for shard")
   try:

@@ -1,5 +1,4 @@
 #include "../liblogosdelivery.h"
-#include "../ffi_callback.h"
 #include "json_utils.h"
 #include <stdio.h>
 #include <string.h>
@@ -15,7 +14,6 @@ static volatile int got_message_received = 0;
 
 // Event callback that handles message events
 void event_callback(int ret, const char *msg, size_t len, void *userData) {
-    (void)userData;
     if (ret != RET_OK || msg == NULL || len == 0) {
         return;
     }
@@ -109,43 +107,37 @@ void event_callback(int ret, const char *msg, size_t len, void *userData) {
     free(eventJson);
 }
 
-// Simple callback that prints results
-void simple_callback(int ret, const char *msg, size_t len, void *userData) {
+// Constructor callback (LogosDeliveryCreateRawFn): reports the terminal result
+// of create_node. `ctxAddr` is the context address as text on success.
+void on_created(int ret, const char *ctxAddr, const char *errMsg, void *userData) {
+    create_node_ok = (ret == RET_OK) ? 1 : 0;
+    if (ret != RET_OK) {
+        printf("[create_node] Error: %s\n", errMsg ? errMsg : "unknown error");
+    }
+}
+
+// Reply callback for the argument-taking calls (subscribe, unsubscribe, send,
+// get_node_info). `reply` is the result on success, `errMsg` on failure.
+void on_reply(int ret, const char *reply, const char *errMsg, void *userData) {
     const char *operation = (const char *)userData;
-    const char *label = operation != NULL ? operation : "callback";
-
-    if (ret == RET_STALE_WARN) {
-        return;
-    }
-
-    if (operation != NULL && strcmp(operation, "create_node") == 0) {
-        create_node_ok = (ret == RET_OK) ? 1 : 0;
-    }
-
     if (ret == RET_OK) {
-        const char *payload = NULL;
-        size_t payload_len = 0;
-        if (!logosdelivery_decode_cbor_reply(msg, len, &payload, &payload_len)) {
-            fprintf(stderr, "[%s] Invalid CBOR request reply\n", label);
-            if (operation != NULL && strcmp(operation, "create_node") == 0) {
-                create_node_ok = 0;
-            }
-            return;
-        }
-
-        printf("[%s] Success", label);
-        if (payload != NULL && payload_len > 0) {
-            printf(": ");
-            fwrite(payload, 1, payload_len, stdout);
-        }
-        printf("\n");
+        printf("[%s] Success: %s\n", operation, reply ? reply : "");
     } else {
-        printf("[%s] Error", label);
-        if (msg != NULL && len > 0) {
-            printf(": ");
-            fwrite(msg, 1, len, stdout);
-        }
-        printf("\n");
+        printf("[%s] Error: %s\n", operation, errMsg ? errMsg : "unknown error");
+    }
+}
+
+// Raw callback for the no-argument calls (start_node, stop_node,
+// get_available_*). `msg` is `len` bytes and not NUL-terminated.
+void on_scalar(int ret, char *msg, size_t len, void *userData) {
+    const char *operation = (const char *)userData;
+    if (ret == RET_STALE_WARN) {
+        return; // non-terminal progress tick
+    }
+    if (ret == RET_OK) {
+        printf("[%s] Success: %.*s\n", operation, (int)len, msg);
+    } else {
+        printf("[%s] Error: %.*s\n", operation, (int)len, msg);
     }
 }
 
@@ -163,7 +155,8 @@ int main() {
     "}";
 
     printf("1. Creating node...\n");
-    void *ctx = logosdelivery_create_node(config, simple_callback, (void *)"create_node");
+    CreateNodeCtorReq createReq = { .configJson = config };
+    void *ctx = logosdelivery_create_node(&createReq, on_created, NULL);
     if (ctx == NULL) {
         printf("Failed to create node\n");
         return 1;
@@ -174,7 +167,7 @@ int main() {
 
     if (create_node_ok != 1) {
         printf("Create node failed, stopping example early.\n");
-        logosdelivery_destroy(ctx, simple_callback, (void *)"destroy");
+        logosdelivery_destroy(ctx);
         return 1;
     }
 
@@ -185,33 +178,35 @@ int main() {
     printf("Event listeners registered for message events\n");
 
     printf("\n3. Starting node...\n");
-    logosdelivery_start_node(ctx, simple_callback, (void *)"start_node");
+    logosdelivery_start_node(ctx, on_scalar, (void *)"start_node");
 
     // Wait for node to start
     sleep(5);
 
     printf("\n4. Subscribing to content topic...\n");
     const char *contentTopic = "/example/1/chat/proto";
-    logosdelivery_subscribe(ctx, simple_callback, (void *)"subscribe", contentTopic);
+    SubscribeReq subscribeReq = { .contentTopicStr = contentTopic };
+    logosdelivery_subscribe(ctx, on_reply, (void *)"subscribe", &subscribeReq);
 
     // Wait for subscription
     sleep(1);
 
-    printf("\n5. Retrieving all possibl node info ids...\n");
-    logosdelivery_get_available_node_info_ids(ctx, simple_callback, (void *)"get_available_node_info_ids");
+    printf("\n5. Retrieving all possible node info ids...\n");
+    logosdelivery_get_available_node_info_ids(ctx, on_scalar, (void *)"get_available_node_info_ids");
 
     printf("\nRetrieving node info for a specific invalid ID...\n");
-    logosdelivery_get_node_info(ctx, simple_callback, (void *)"get_node_info", "WrongNodeInfoId");
+    GetNodeInfoReq nodeInfoReq = { .nodeInfoId = "WrongNodeInfoId" };
+    logosdelivery_get_node_info(ctx, on_reply, (void *)"get_node_info", &nodeInfoReq);
 
     printf("\nRetrieving several node info for specific correct IDs...\n");
-    logosdelivery_get_node_info(ctx, simple_callback, (void *)"get_node_info", "Version");
-    // logosdelivery_get_node_info(ctx, simple_callback, (void *)"get_node_info", "Metrics");
-    logosdelivery_get_node_info(ctx, simple_callback, (void *)"get_node_info", "MyMultiaddresses");
-    logosdelivery_get_node_info(ctx, simple_callback, (void *)"get_node_info", "MyENR");
-    logosdelivery_get_node_info(ctx, simple_callback, (void *)"get_node_info", "MyPeerId");
+    const char *nodeInfoIds[] = {"Version", "MyMultiaddresses", "MyENR", "MyPeerId"};
+    for (size_t i = 0; i < sizeof(nodeInfoIds) / sizeof(nodeInfoIds[0]); i++) {
+        GetNodeInfoReq req = { .nodeInfoId = nodeInfoIds[i] };
+        logosdelivery_get_node_info(ctx, on_reply, (void *)"get_node_info", &req);
+    }
 
     printf("\nRetrieving available configs...\n");
-    logosdelivery_get_available_configs(ctx, simple_callback, (void *)"get_available_configs");
+    logosdelivery_get_available_configs(ctx, on_scalar, (void *)"get_available_configs");
 
     printf("\n6. Sending a message...\n");
     printf("Watch for message events (sent, propagated, or error):\n");
@@ -221,7 +216,8 @@ int main() {
         "\"payload\": \"SGVsbG8sIExvZ29zIE1lc3NhZ2luZyE=\","
         "\"ephemeral\": false"
     "}";
-    logosdelivery_send(ctx, simple_callback, (void *)"send", message);
+    SendReq sendReq = { .messageJson = message };
+    logosdelivery_send(ctx, on_reply, (void *)"send", &sendReq);
 
     // Poll for terminal message events (sent, error, or received) with timeout
     printf("Waiting for message delivery events...\n");
@@ -237,17 +233,18 @@ int main() {
     }
 
     printf("\n7. Unsubscribing from content topic...\n");
-    logosdelivery_unsubscribe(ctx, simple_callback, (void *)"unsubscribe", contentTopic);
+    UnsubscribeReq unsubscribeReq = { .contentTopicStr = contentTopic };
+    logosdelivery_unsubscribe(ctx, on_reply, (void *)"unsubscribe", &unsubscribeReq);
 
     sleep(1);
 
     printf("\n8. Stopping node...\n");
-    logosdelivery_stop_node(ctx, simple_callback, (void *)"stop_node");
+    logosdelivery_stop_node(ctx, on_scalar, (void *)"stop_node");
 
     sleep(1);
 
     printf("\n9. Destroying context...\n");
-    logosdelivery_destroy(ctx, simple_callback, (void *)"destroy");
+    logosdelivery_destroy(ctx);
 
     printf("\n=== Example completed ===\n");
     return 0;

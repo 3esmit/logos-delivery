@@ -289,21 +289,29 @@ proc evaluateAndCleanUp(self: SendService) =
     )
   )
 
-proc admitOnce(self: SendService, task: DeliveryTask): Future[bool] {.async.} =
-  ## Charges the task's first transmission against the epoch budget, at most
-  ## once per task (`firstAdmittedTime`); retries then resend for free. Returns
-  ## false when the task must stay parked for a later epoch.
-  if task.firstAdmittedTime.isSome():
-    return true
+proc admitAndProve(self: SendService, task: DeliveryTask): Future[bool] {.async.} =
+  ## Gates a task's first transmission: charges one epoch slot, then attaches
+  ## an RLN proof — strictly in that order, so an over-budget message never
+  ## draws a nonce. The slot is charged at most once per task lifetime
+  ## (`firstAdmittedTime`); the proof attach is retried each round until it
+  ## sticks, then short-circuits, so a task charged but not yet proven never
+  ## ships bare. Returns false while the task must stay parked for a later round.
+  if task.firstAdmittedTime.isNone():
+    (await self.rateLimitManager.admit(task.msg.payload)).isOkOr:
+      debug "over rate-limit budget, task waits for the epoch to roll",
+        requestId = task.requestId, msgHash = task.msgHash.to0xHex()
+      task.rateLimitParked = true
+      return false
 
-  (await self.rateLimitManager.admit(task.msg.payload)).isOkOr:
-    debug "over rate-limit budget, task waits for the epoch to roll",
-      requestId = task.requestId, msgHash = task.msgHash.to0xHex()
-    task.rateLimitParked = true
+    task.refreshAfterRateLimitPark()
+    task.firstAdmittedTime = Opt.some(Moment.now())
+
+  ## A no-op when RLN is not mounted, or when a prior round already attached a
+  ## proof; otherwise draws the nonce and attaches.
+  task.msg = (await self.waku.attachRlnProof(task.msg)).valueOr:
+    error "failed to attach RLN proof, retrying next round",
+      requestId = task.requestId, error = error
     return false
-
-  task.refreshAfterRateLimitPark()
-  task.firstAdmittedTime = Opt.some(Moment.now())
   return true
 
 proc pendingRateLimitedTaskCount(self: SendService): int =
@@ -327,7 +335,7 @@ proc trySendMessages*(self: SendService) {.async.} =
 
   for task in tasksToSend:
     # Todo, check if it has any perf gain to run them concurrent...
-    if not (await self.admitOnce(task)):
+    if not (await self.admitAndProve(task)):
       continue
     if not (await self.attachRlnProof(task)):
       continue
@@ -359,14 +367,15 @@ proc send*(self: SendService, task: DeliveryTask) {.async.} =
   info "SendService.send: processing delivery task",
     requestId = task.requestId, msgHash = task.msgHash.to0xHex()
 
-  self.waku.subscribeSend(task.msg.contentTopic).isOkOr:
-    task.state = DeliveryState.FailedToDeliver
-    task.errorDesc = "Failed to acquire content-topic lease: " & error
-    reportTaskResult(self, task)
-    return
-  task.sendSubscriptionAcquired = true
+  if not task.sendSubscriptionAcquired:
+    self.waku.subscribeSend(task.msg.contentTopic).isOkOr:
+      task.state = DeliveryState.FailedToDeliver
+      task.errorDesc = "Failed to acquire content-topic lease: " & error
+      reportTaskResult(self, task)
+      return
+    task.sendSubscriptionAcquired = true
 
-  if not (await self.admitOnce(task)):
+  if not (await self.admitAndProve(task)):
     if not self.canParkForRateLimit():
       task.state = DeliveryState.FailedToDeliver
       task.errorDesc = RateLimitQueueFullError

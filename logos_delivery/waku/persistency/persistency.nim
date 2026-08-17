@@ -10,7 +10,7 @@
 ## it. Cheapest, no map lookup per call:
 ##
 ## ```nim
-## let p = Persistency.instance("/var/lib/wakustore").get()
+## let p = Persistency.new("/var/lib/wakustore").get()
 ## let j = p.openJob("alpha").get()
 ## await j.persistPut("msg", k, payload)
 ## let v = await j.get("msg", k)
@@ -52,6 +52,11 @@ logScope:
 
 const DefaultStoragePath* = "./data"
 
+const InMemoryStoragePath* = ":memory:"
+  ## Pass as ``rootDir`` to keep every job in a private in-memory SQLite
+  ## database (one per job worker; nothing touches the filesystem).
+  ## State is lost when the job closes. Intended for tests.
+
 # ── Driver types ────────────────────────────────────────────────────────
 
 type
@@ -67,15 +72,21 @@ type
   Persistency* = ref object
     ## Per-root coordinator. One Persistency instance manages a directory
     ## of per-job SQLite files at ``rootDir/<jobId>.db``.
+    ##
+    ## ``GetPersistency`` RequestBroker will give access to the active
+    ## instance of the current node.
+    ## Owner must close it properly (``Persistency.close``) to stop all jobs and
+    ## free the threads.
     rootDir*: string
     jobs*: Table[string, Job]
 
-# ── Singleton state ─────────────────────────────────────────────────────
+# ── Instance access broker ──────────────────────────────────────────────
 #
-# Persistency is a process-wide singleton: one rootDir at a time. The
-# `instance` factory is the only public constructor; `new` below is
-# private and skips the singleton bookkeeping (used internally and never
-# called twice with conflicting rootDirs).
+# The owner of a Persistency instance (the Waku node) provides it under
+# its BrokerContext; consumers on the same context (e.g. the SDS channel
+# layer) resolve it without holding a reference to the owner. Sync and
+# same-thread: the provider returns the ref directly, no copies or
+# marshalling. One instance per owner — nothing is process-global.
 
 var
   gPersistency {.global.}: Persistency
@@ -85,15 +96,20 @@ var
 once:
   gPersistencyLock.initLock()
 
+RequestBroker(sync):
+  proc getPersistency(): Result[Persistency, string]
+
 # ── Lifecycle ───────────────────────────────────────────────────────────
 
 proc dbPathFor(p: Persistency, jobId: string): string =
+  if p.rootDir == InMemoryStoragePath:
+    return InMemoryStoragePath
   p.rootDir / (jobId & ".db")
 
-proc new(T: type Persistency, rootDir: string): Result[T, PersistencyError] =
-  ## Private. Build a Persistency value without touching the singleton
-  ## slot. Validates ``rootDir`` but does **not** create it — directory
-  ## materialisation is deferred to the first ``openJob`` call. Semantics:
+proc new*(T: type Persistency, rootDir: string): Result[T, PersistencyError] =
+  ## Build a Persistency instance for ``rootDir``. Validates ``rootDir``
+  ## but does **not** create it — directory materialisation is deferred
+  ## to the first ``openJob`` call. Semantics:
   ##
   ## * If ``rootDir`` is empty, returns ``peInvalidArgument``.
   ## * If ``rootDir`` exists and is a directory, accept it.
@@ -103,6 +119,8 @@ proc new(T: type Persistency, rootDir: string): Result[T, PersistencyError] =
   ##   existing ancestor must be a directory; otherwise returns
   ##   ``peInvalidArgument``. This catches "obviously broken" paths early
   ##   without actually touching the filesystem.
+  if rootDir == InMemoryStoragePath:
+    return ok(T(rootDir: rootDir, jobs: initTable[string, Job]()))
   if rootDir.len == 0:
     return err(persistencyErr(peInvalidArgument, "rootDir is empty"))
   if fileExists(rootDir) and not dirExists(rootDir):
@@ -127,6 +145,8 @@ proc new(T: type Persistency, rootDir: string): Result[T, PersistencyError] =
 proc ensureRootDir(p: Persistency): Result[void, PersistencyError] =
   ## Materialise ``rootDir`` on demand. Idempotent; called from
   ## ``openJob`` so an unused Persistency leaves no directory behind.
+  if p.rootDir == InMemoryStoragePath:
+    return ok()
   if dirExists(p.rootDir):
     return ok()
   try:
@@ -253,6 +273,8 @@ proc dropJob*(p: Persistency, jobId: string) =
   ## Close the job if open, then delete its DB file (plus -wal / -shm
   ## sidecars). Best-effort: a missing file is not an error.
   p.closeJob(jobId)
+  if p.rootDir == InMemoryStoragePath:
+    return
   let path = dbPathFor(p, jobId)
   for suffix in ["", "-wal", "-shm"]:
     try:
