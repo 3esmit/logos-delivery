@@ -367,12 +367,13 @@ proc send*(self: SendService, task: DeliveryTask) {.async.} =
   info "SendService.send: processing delivery task",
     requestId = task.requestId, msgHash = task.msgHash.to0xHex()
 
-  self.waku.subscribeSend(task.msg.contentTopic).isOkOr:
-    task.state = DeliveryState.FailedToDeliver
-    task.errorDesc = "Failed to acquire content-topic lease: " & error
-    reportTaskResult(self, task)
-    return
-  task.sendSubscriptionAcquired = true
+  if not task.sendSubscriptionAcquired:
+    self.waku.subscribeSend(task.msg.contentTopic).isOkOr:
+      task.state = DeliveryState.FailedToDeliver
+      task.errorDesc = "Failed to acquire content-topic lease: " & error
+      reportTaskResult(self, task)
+      return
+    task.sendSubscriptionAcquired = true
 
   if not (await self.admitAndProve(task)):
     if not self.canParkForRateLimit():
