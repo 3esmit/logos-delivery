@@ -226,6 +226,7 @@ proc instance*(T: type Persistency): Result[T, PersistencyError] {.gcsafe.} =
     if gPersistency.isNil:
       return err(persistencyErr(peClosed, "Persistency not initialised"))
     return ok(gPersistency)
+
 proc openJob*(p: Persistency, jobId: string): Result[Job, PersistencyError] =
   ## Open-or-create a job under this Persistency.
   ##
