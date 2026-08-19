@@ -69,6 +69,11 @@ void *logosdelivery_create_node(
 **Returns:** the context handle, or `NULL` on failure. Creation is asynchronous:
 wait for `onCreated` before you make any other call.
 
+A context whose `onCreated` reported `RET_ERR` stays live but holds no node.
+Every later call on it answers `RET_ERR` with `library is not initialized: the
+constructor failed or has not run yet`, and `logosdelivery_destroy` still
+releases it.
+
 **Example configuration JSON:**
 ```json
 {
@@ -108,7 +113,8 @@ int logosdelivery_start_node(void *ctx, LogosDeliveryScalarRawFn callback, void 
 ```
 
 #### `logosdelivery_stop_node`
-Stops the node.
+Stops the node and removes the event listeners. A second call is a no-op that
+reports `RET_OK`.
 
 ```c
 int logosdelivery_stop_node(void *ctx, LogosDeliveryScalarRawFn callback, void *userData);
@@ -121,6 +127,30 @@ use `ctx` afterwards.
 ```c
 int logosdelivery_destroy(void *ctx);
 ```
+
+Stops the node first if it still runs, so skipping `logosdelivery_stop_node` no
+longer leaves a live node behind. It blocks for up to 15 s at the nim-ffi
+defaults (`2 * ffiRecycleTimeoutMs + ffiTeardownTimeoutMs + 2 s`).
+
+Prefer an explicit `logosdelivery_stop_node`: a failed stop here is only logged
+(`RET_ERR` covers an invalid `ctx` and a failed context teardown, nothing else),
+and nim-ffi cancels the stop at `ffiTeardownTimeoutMs` (10 s), leaving the node
+half stopped.
+
+### Context-free calls
+
+No `ctx` and no callback: `dlsym` the symbol and read the return value.
+
+#### `logosdelivery_version`
+Version and git commit hash. Callable before `logosdelivery_create_node`, though
+the first call into the library starts the Nim runtime.
+
+```c
+const char *logosdelivery_version(void);
+```
+
+The buffer belongs to the calling thread and stays valid until that thread calls
+`logosdelivery_version` again, so copy the bytes.
 
 ### Messaging
 
