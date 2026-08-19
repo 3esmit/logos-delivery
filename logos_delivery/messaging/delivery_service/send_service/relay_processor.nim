@@ -36,11 +36,11 @@ proc new*(
 
 proc isTopicHealthy(self: RelaySendProcessor, topic: PubsubTopic): bool {.gcsafe.} =
   let healthReport = RequestShardTopicsHealth.request(self.brokerCtx, @[topic]).valueOr:
-    error "isTopicHealthy: failed to get health report", topic = topic, error = error
+    debug "isTopicHealthy: failed to get health report", topic = topic, error = error
     return false
 
   if healthReport.topicHealth.len() < 1:
-    warn "isTopicHealthy: no topic health entries", topic = topic
+    debug "isTopicHealthy: no topic health entries", topic = topic
     return false
   let health = healthReport.topicHealth[0].health
   debug "isTopicHealthy: topic health is ", topic = topic, health = health
@@ -55,19 +55,17 @@ method isValidProcessor*(
 
 method sendImpl*(self: RelaySendProcessor, task: DeliveryTask) {.async.} =
   task.tryCount.inc()
-  info "Trying message delivery via Relay",
+  debug "Trying message delivery via Relay",
     requestId = task.requestId,
     msgHash = task.msgHash.to0xHex(),
     tryCount = task.tryCount
 
   let noOfPublishedPeers = (await self.publishProc(task.pubsubTopic, task.msg)).valueOr:
     let errorMessage = error.desc.get($error.code)
-    error "Failed to publish message with relay",
+    debug "Failed to publish message with relay",
       request = task.requestId, msgHash = task.msgHash.to0xHex(), error = errorMessage
-    if error.isStaleRlnProof():
-      self.waku.onRlnProofRejected()
-      task.retryWithFreshRlnProof()
-      task.state = DeliveryState.NextRoundRetry
+    if error.isRlnRejection():
+      task.parkForRlnProofRefresh(self.waku)
       return
 
     if error.code != LightPushErrorCode.NO_PEERS_TO_RELAY:
@@ -78,7 +76,7 @@ method sendImpl*(self: RelaySendProcessor, task: DeliveryTask) {.async.} =
     return
 
   if noOfPublishedPeers > 0:
-    info "Message propagated via Relay",
+    debug "Message propagated via Relay",
       requestId = task.requestId,
       msgHash = task.msgHash.to0xHex(),
       noOfPeers = noOfPublishedPeers

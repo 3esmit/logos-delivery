@@ -24,7 +24,7 @@ method sendImpl*(
     self: LightpushSendProcessor, task: DeliveryTask
 ): Future[void] {.async.} =
   task.tryCount.inc()
-  info "Trying message delivery via Lightpush",
+  debug "Trying message delivery via Lightpush",
     requestId = task.requestId,
     msgHash = task.msgHash.to0xHex(),
     tryCount = task.tryCount
@@ -32,11 +32,10 @@ method sendImpl*(
   let numLightpushServers = (
     await self.waku.lightpushPublishToAny(task.pubsubTopic, task.msg)
   ).valueOr:
-    error "LightpushSendProcessor.sendImpl failed", error = error.desc.get($error.code)
-    if error.isStaleRlnProof():
-      self.waku.onRlnProofRejected()
-      task.retryWithFreshRlnProof()
-      task.state = DeliveryState.NextRoundRetry
+    debug "LightpushSendProcessor.sendImpl failed", error = error.desc.get($error.code)
+
+    if error.isRlnRejection():
+      task.parkForRlnProofRefresh(self.waku)
       return
 
     case error.code
@@ -52,7 +51,7 @@ method sendImpl*(
     return
 
   if numLightpushServers > 0:
-    info "Message propagated via Lightpush",
+    debug "Message propagated via Lightpush",
       requestId = task.requestId, msgHash = task.msgHash.to0xHex()
     task.state = DeliveryState.SuccessfullyPropagated
     task.deliveryTime = Moment.now()
