@@ -179,13 +179,6 @@ proc logosdelivery_create_node(
 
   return ok(lib)
 
-proc logosdelivery_destroy(self: LogosDelivery) {.ffiDtor.} =
-  ## nim-ffi runs this when the host destroys the node, before the FFI
-  ## thread can serve a later create. The forwarders registered at create
-  ## feed the C listener registry, which lives from create to destroy; the
-  ## node's broker scope carries them and dies with the node, here.
-  await self.teardownFFIEventScope()
-
 proc logosdelivery_start_node(
     self: LogosDelivery
 ): Future[Result[string, string]] {.ffi.} =
@@ -195,11 +188,26 @@ proc logosdelivery_start_node(
     return err("failed to start: " & errMsg)
   return ok("")
 
+proc stopNode(self: LogosDelivery): Future[Result[void, string]] {.async.} =
+  if not self.isRunning():
+    return ok()
+
+  await self.stop()
+
 proc logosdelivery_stop_node(
     self: LogosDelivery
 ): Future[Result[string, string]] {.ffi.} =
-  (await self.stop()).isOkOr:
+  (await self.stopNode()).isOkOr:
     let errMsg = $error
     chronicles.error "STOP_NODE failed", err = errMsg
     return err("failed to stop: " & errMsg)
   return ok("")
+
+proc logosdelivery_destroy(self: LogosDelivery) {.ffiDtor.} =
+  ## Safety net for a host that skips `stop_node` (#4108): nim-ffi recycles the
+  ## worker rather than joining it, so an unstopped node keeps running.
+  ## The forwarders registered at create live until here, with the node's
+  ## broker scope; `teardownFFIEventScope` is the other end of create.
+  (await self.stopNode()).isOkOr:
+    chronicles.error "DESTROY failed", err = error
+  await self.teardownFFIEventScope()

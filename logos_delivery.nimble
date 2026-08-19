@@ -57,11 +57,11 @@ requires "nim >= 2.2.4",
   "zlib",
   # Debug & Testing
   "testutils",
-  "unittest2"
+  "unittest2",
+  # FFI
+  "ffi == 0.3.0"
 
 # Packages not on nimble (use git URLs)
-
-requires "https://github.com/logos-messaging/nim-ffi#53515de17af0ef3e88b2aec9675b8163dddc14ae" # v0.3.0-rc.2
 
 requires "https://github.com/logos-messaging/nim-sds.git#b12f5ee07c5b764303b51fb948b32a4ade1de3b5"
 
