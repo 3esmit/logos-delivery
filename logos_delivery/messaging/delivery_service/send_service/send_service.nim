@@ -2,7 +2,7 @@
 ##
 
 import std/[sequtils, tables, typetraits]
-import chronos, chronicles, libp2p/utility
+import chronos, chronicles, metrics, libp2p/utility
 import brokers/broker_context
 import
   ./[send_processor, relay_processor, lightpush_processor, delivery_task],
@@ -14,6 +14,9 @@ import logos_delivery/api/events/messaging_client_events
 
 logScope:
   topics = "send service"
+
+declarePublicCounter logos_delivery_send_store_validation_timeout_total,
+  "messages propagated but dropped without store-node validation within the retry window"
 
 # This useful util is missing from sequtils, this extends applyIt with predicate...
 template applyItIf*(varSeq, pred, op: untyped) =
@@ -281,6 +284,7 @@ proc evaluateAndCleanUp(self: SendService) =
         requestId = task.requestId,
         msgHash = task.msgHash.to0xHex(),
         propagationAge = task.propagationAge()
+      logos_delivery_send_store_validation_timeout_total.inc()
 
   self.taskCache.keepItIf(
     not (

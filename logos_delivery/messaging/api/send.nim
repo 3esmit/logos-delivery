@@ -1,5 +1,5 @@
 ## Messaging layer API — send operation.
-import results, chronos
+import results, chronos, chronicles
 
 import logos_delivery/api/types
 import logos_delivery/api/events/messaging_client_events
