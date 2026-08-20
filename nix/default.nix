@@ -46,6 +46,15 @@ let
     else if pkgs.stdenv.hostPlatform.isDarwin then "dylib"
     else "so";
 
+  # Keep the generated nim-ffi header beside the public wrapper header.
+  # These flags mirror the repository Makefile's liblogosdelivery target.
+  cBindingsFlags = [
+    "-d:ffiGenBindings"
+    "-d:targetLang=c"
+    "-d:ffiOutputDir=library/generated"
+    "-d:ffiSrcPath=../liblogosdelivery.nim"
+  ];
+
   # Shared `nim c` invocation. Callers vary the output, the source file and a
   # few mode-specific flags (e.g. --app:lib, --noMain, --header); everything
   # else (paths, defines, threading, gc, nimcache, rln linkage) is constant.
@@ -88,7 +97,7 @@ pkgs.stdenv.mkDerivation {
     export NIMBLE_DIR=$TMPDIR/.nimble
     export NIMCACHE=$TMPDIR/nimcache
 
-    mkdir -p build $NIMCACHE
+    mkdir -p build $NIMCACHE library/generated
 
     # nat_traversal bundles C sub-libraries that must be compiled before linking.
     # Copy the fetchgit store path to a writable tmpdir, build, then pass to nim.
@@ -114,7 +123,7 @@ pkgs.stdenv.mkDerivation {
     ${nimCompile {
       outFile = "build/liblogosdelivery.${libExt}";
       sourceFile = "library/liblogosdelivery.nim";
-      extraArgs = [
+      extraArgs = cBindingsFlags ++ [
         "--app:lib"
         "--opt:size"
         "--noMain"
@@ -127,7 +136,7 @@ pkgs.stdenv.mkDerivation {
     ${nimCompile {
       outFile = "build/liblogosdelivery.a";
       sourceFile = "library/liblogosdelivery.nim";
-      extraArgs = [
+      extraArgs = cBindingsFlags ++ [
         "--app:staticlib"
         "--opt:size"
         "--noMain"
@@ -144,11 +153,13 @@ pkgs.stdenv.mkDerivation {
     runHook postInstall
   '' else ''
     runHook preInstall
-    mkdir -p $out/lib $out/include
+    mkdir -p $out/lib $out/include/generated
     cp build/liblogosdelivery.${libExt} $out/lib/ 2>/dev/null || true
     cp build/liblogosdelivery.a         $out/lib/ 2>/dev/null || true
     cp library/liblogosdelivery.h        $out/include/ 2>/dev/null || true
     cp library/liblogosdelivery_kernel.h $out/include/ 2>/dev/null || true
+    test -f library/generated/logosdelivery.h
+    install -Dm644 library/generated/logosdelivery.h $out/include/generated/logosdelivery.h
     runHook postInstall
   '';
 
