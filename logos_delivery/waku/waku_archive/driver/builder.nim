@@ -80,6 +80,9 @@ proc new*(
       if migrate:
         (await archive_postgres_driver_migrations.migrate(driver)).isOkOr:
           return err("ArchiveDriver build failed in migration: " & $error)
+      else:
+        (await archive_postgres_driver_migrations.validateSchema(driver)).isOkOr:
+          return err("ArchiveDriver build rejected database schema: " & $error)
 
       ## This should be started once we make sure the 'messages' table exists
       ## Hence, this should be run after the migration is completed.

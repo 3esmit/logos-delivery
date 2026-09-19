@@ -11,6 +11,8 @@ logScope:
 
 const SchemaVersion* = 8 # increase this when there is an update in the database schema
 
+const RequiredSchemaTables = ["messages", "messages_lookup"]
+
 proc breakIntoStatements*(script: string): seq[string] =
   ## Given a full migration script, that can potentially contain a list
   ## of SQL statements, this proc splits it into the contained isolated statements
@@ -53,6 +55,28 @@ proc breakIntoStatements*(script: string): seq[string] =
 
   return statements
 
+proc validateSchema*(
+    driver: PostgresDriver, targetVersion = SchemaVersion
+): Future[DatabaseResult[void]] {.async.} =
+  ## Confirm that the version marker and tables required by Store queries agree.
+  ## A stale version marker must not make an incomplete database look usable.
+  let currentVersion = (await driver.getCurrentVersion()).valueOr:
+    return err("could not retrieve current schema version: " & $error)
+
+  if currentVersion != targetVersion:
+    return err(
+      "database schema version is " & $currentVersion & ", expected " & $targetVersion &
+        "; enable database migration"
+    )
+
+  for tableName in RequiredSchemaTables:
+    let tableExists = (await driver.existsTable(tableName)).valueOr:
+      return err("could not check required table " & tableName & ": " & $error)
+    if not tableExists:
+      return err("database schema is missing required table " & tableName)
+
+  return ok()
+
 proc migrate*(
     driver: PostgresDriver, targetVersion = SchemaVersion
 ): Future[DatabaseResult[void]] {.async.} =
@@ -64,7 +88,7 @@ proc migrate*(
   if currentVersion == targetVersion:
     debug "Database schema is up to date",
       currentVersion = currentVersion, targetVersion = targetVersion
-    return ok()
+    return await driver.validateSchema(targetVersion)
 
   info "database schema is outdated",
     currentVersion = currentVersion, targetVersion = targetVersion
@@ -96,4 +120,4 @@ proc migrate*(
 
   info "finished message store's postgres database migration"
 
-  return ok()
+  return await driver.validateSchema(targetVersion)
