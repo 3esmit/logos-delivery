@@ -37,3 +37,17 @@ suite "Partition Manager":
     ## Must not raise, even though the queue is empty
     manager.removeOldestPartitionName("messages_1717372800_1717376400")
     check manager.isEmpty()
+
+  test "Empty manager has no current partition":
+    let manager = PartitionManager.new()
+    check not manager.hasCurrentPartition(1717372850)
+
+  test "Stale manager has no current partition":
+    let manager = PartitionManager.new()
+    manager.addPartitionInfo("messages_1717372800_1717376400", 1717372800, 1717376400)
+    check not manager.hasCurrentPartition(1717376400)
+
+  test "Current partition is detected":
+    let manager = PartitionManager.new()
+    manager.addPartitionInfo("messages_1717372800_1717376400", 1717372800, 1717376400)
+    check manager.hasCurrentPartition(1717372850)

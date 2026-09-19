@@ -1493,6 +1493,10 @@ const MaxConsecutivePartitionMaintenanceFailures = 6
 
 const MaxPartitionCheckJitterSecs = 120
 
+const NoCurrentPartitionCoverageError = "no current partition coverage"
+const PartitionCoverageCreationDeferredError =
+  "partition coverage creation deferred without current coverage"
+
 proc runPartitionMaintenance(
     self: PostgresDriver
 ): Future[ArchiveDriverResult[void]] {.async.} =
@@ -1515,10 +1519,33 @@ proc runPartitionMaintenance(
 
   let now = times.now().toTime().toUnix()
 
-  if self.partitionMngr.isEmpty():
-    debug "Adding partition because now there aren't more partitions"
-    (await self.addPartition(now)).isOkOr:
-      return err("error when creating a new partition from empty state: " & $error)
+  if not self.partitionMngr.hasCurrentPartition(now):
+    debug "Adding partition because no partition covers the current time"
+    let addResult = await self.addPartition(now)
+    if addResult.isErr():
+      ## Another instance may have completed the same partition between the
+      ## refresh above and our failed DDL attempt. Re-read before declaring
+      ## current coverage lost; a genuine no-coverage failure remains fatal.
+      let refreshed = await self.refreshPartitionsInfo()
+      if refreshed.isErr():
+        return err(
+          "failed to refresh partition coverage after creation error: " & refreshed.error
+        )
+      elif self.partitionMngr.hasCurrentPartition(now):
+        debug "Current partition appeared while handling creation error",
+          error = addResult.error
+      else:
+        return err(NoCurrentPartitionCoverageError & ": " & addResult.error)
+    elif not self.partitionMngr.hasCurrentPartition(now):
+      ## addPartition returns success when another instance holds the
+      ## advisory lock. Refresh once now so a completed peer is observed; if
+      ## it is still absent, mark this pass retryable rather than reporting a
+      ## successful maintenance pass with no writable range.
+      let refreshed = await self.refreshPartitionsInfo()
+      if refreshed.isOk() and self.partitionMngr.hasCurrentPartition(now):
+        debug "Current partition appeared after deferred creation"
+      else:
+        return err(PartitionCoverageCreationDeferredError)
   else:
     let newestPartition = self.partitionMngr.getNewestPartition().valueOr:
       return err("could not get newest partition: " & $error)
@@ -1570,20 +1597,37 @@ proc loopPartitionFactory(
     if passRes.isOk():
       consecutiveFailures = 0
     else:
-      ## Partitions are created an hour ahead of time and this loop runs every
-      ## ten minutes, so about six passes can fail before the messages arriving
-      ## have nowhere to land. A single failed pass is usually a race with the
-      ## other instances maintaining the same database, which is transient by
-      ## nature; only a persistent failure is worth bringing the node down for.
-      consecutiveFailures.inc()
-      error "partition maintenance pass failed, will retry",
-        error = passRes.error, consecutiveFailures
+      if passRes.error.startsWith(PartitionCoverageCreationDeferredError):
+        ## Another instance currently owns the DDL lock. Keep this bounded by
+        ## the normal retry budget if that instance never establishes coverage.
+        consecutiveFailures.inc()
+        error "partition coverage creation deferred, will retry",
+          error = passRes.error, consecutiveFailures
 
-      if consecutiveFailures >= MaxConsecutivePartitionMaintenanceFailures:
-        onFatalError(
-          "partition maintenance failed " & $consecutiveFailures & " consecutive times: " &
-            passRes.error
-        )
+        if consecutiveFailures >= MaxConsecutivePartitionMaintenanceFailures:
+          onFatalError(
+            "partition coverage creation deferred " & $consecutiveFailures &
+              " consecutive times: " & passRes.error
+          )
+      elif passRes.error.startsWith(NoCurrentPartitionCoverageError):
+        error "partition maintenance lost current coverage", error = passRes.error
+        onFatalError(passRes.error)
+        return
+      else:
+        ## Partitions are created an hour ahead of time and this loop runs every
+        ## ten minutes, so about six passes can fail before the messages arriving
+        ## have nowhere to land. A single failed pass is usually a race with the
+        ## other instances maintaining the same database, which is transient by
+        ## nature; only a persistent failure is worth bringing the node down for.
+        consecutiveFailures.inc()
+        error "partition maintenance pass failed, will retry",
+          error = passRes.error, consecutiveFailures
+
+        if consecutiveFailures >= MaxConsecutivePartitionMaintenanceFailures:
+          onFatalError(
+            "partition maintenance failed " & $consecutiveFailures & " consecutive times: " &
+              passRes.error
+          )
 
     await sleepAsync(
       DefaultDatabasePartitionCheckTimeInterval +
