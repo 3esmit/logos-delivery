@@ -4,6 +4,7 @@ import results, std/[os, sequtils, strutils], testutils/unittests, chronos
 import
   logos_delivery/waku/[
     waku_archive,
+    waku_archive/driver/builder,
     waku_archive/driver/postgres_driver,
     waku_archive/driver/postgres_driver/migrations as postgres_migrations,
     waku_core,
@@ -65,33 +66,44 @@ suite "Postgres driver":
 
   asyncTest "fresh and upgraded schemas validate Store tables":
     let dbName = temporaryDatabaseName()
+    var temporaryDriver: PostgresDriver
     await createTemporaryDatabase(dbName)
-    let temporaryDriver = PostgresDriver
-      .new(temporaryDatabaseUrl(dbName), maxConnections = 4)
-      .expect("temporary driver")
+    try:
+      temporaryDriver = PostgresDriver
+        .new(temporaryDatabaseUrl(dbName), maxConnections = 4)
+        .expect("temporary driver")
 
-    (await postgres_migrations.migrate(temporaryDriver, targetVersion = 7)).expect(
-      "migrate temporary database to version 7"
-    )
-    check (await temporaryDriver.getCurrentVersion()).expect("version 7") == 7
+      (await postgres_migrations.migrate(temporaryDriver, targetVersion = 7)).expect(
+        "migrate temporary database to version 7"
+      )
+      check (await temporaryDriver.getCurrentVersion()).expect("version 7") == 7
 
-    (await postgres_migrations.migrate(temporaryDriver)).expect(
-      "upgrade temporary database to current version"
-    )
-    check (await postgres_migrations.validateSchema(temporaryDriver)).isOk()
-    check (await temporaryDriver.existsTable("messages_lookup")).expect(
-      "messages_lookup table"
-    )
+      (await postgres_migrations.migrate(temporaryDriver)).expect(
+        "upgrade temporary database to current version"
+      )
+      check (await postgres_migrations.validateSchema(temporaryDriver)).isOk()
+      check (await temporaryDriver.existsTable("messages_lookup")).expect(
+        "messages_lookup table"
+      )
 
-    (await temporaryDriver.performWriteQuery("DROP TABLE messages_lookup CASCADE")).expect(
-      "drop lookup table"
-    )
-    let invalidSchema = await postgres_migrations.validateSchema(temporaryDriver)
-    check invalidSchema.isErr()
-    check invalidSchema.error.contains("messages_lookup")
+      (await temporaryDriver.performWriteQuery("DROP TABLE messages_lookup CASCADE")).expect(
+        "drop lookup table"
+      )
+      let invalidSchema = await postgres_migrations.validateSchema(temporaryDriver)
+      check invalidSchema.isErr()
+      check invalidSchema.error.contains("messages_lookup")
 
-    (await temporaryDriver.close()).expect("close temporary driver")
-    await dropTemporaryDatabase(dbName)
+      (await temporaryDriver.close()).expect("close temporary driver")
+      temporaryDriver = nil
+
+      let builderResult =
+        await ArchiveDriver.new(temporaryDatabaseUrl(dbName), false, false, 4, nil)
+      check builderResult.isErr()
+      check builderResult.error.contains("messages_lookup")
+    finally:
+      if not temporaryDriver.isNil:
+        discard await temporaryDriver.close()
+      await dropTemporaryDatabase(dbName)
 
   asyncTest "Insert a message":
     const contentTopic = "test-content-topic"

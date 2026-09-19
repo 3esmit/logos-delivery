@@ -69,11 +69,12 @@ proc validateSchema*(
         "; enable database migration"
     )
 
-  for tableName in RequiredSchemaTables:
-    let tableExists = (await driver.existsTable(tableName)).valueOr:
-      return err("could not check required table " & tableName & ": " & $error)
-    if not tableExists:
-      return err("database schema is missing required table " & tableName)
+  if targetVersion == SchemaVersion:
+    for tableName in RequiredSchemaTables:
+      let tableExists = (await driver.existsTable(tableName)).valueOr:
+        return err("could not check required table " & tableName & ": " & $error)
+      if not tableExists:
+        return err("database schema is missing required table " & tableName)
 
   return ok()
 
