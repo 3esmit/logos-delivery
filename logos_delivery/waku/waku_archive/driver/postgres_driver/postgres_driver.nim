@@ -1625,8 +1625,8 @@ proc loopPartitionFactory(
 
         if consecutiveFailures >= MaxConsecutivePartitionMaintenanceFailures:
           onFatalError(
-            "partition maintenance failed " & $consecutiveFailures & " consecutive times: " &
-              passRes.error
+            "partition maintenance failed " & $consecutiveFailures &
+              " consecutive times: " & passRes.error
           )
 
     await sleepAsync(
