@@ -1,16 +1,6 @@
 {
   "version": 2,
   "packages": {
-    "nim": {
-      "version": "2.2.4",
-      "vcsRevision": "911e0dbb1f76de61fa0215ab1bb85af5334cc9a8",
-      "url": "https://github.com/nim-lang/Nim.git",
-      "downloadMethod": "git",
-      "dependencies": [],
-      "checksums": {
-        "sha1": "68bb85cbfb1832ce4db43943911b046c3af3caab"
-      }
-    },
     "unittest2": {
       "version": "0.2.5",
       "vcsRevision": "26f2ef3ae0ec72a2a75bfe557e02e88f6a31c189",
