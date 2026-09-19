@@ -1,10 +1,12 @@
 {.used.}
 
-import results, std/[sequtils, strutils], testutils/unittests, chronos
+import results, std/[os, sequtils, strutils], testutils/unittests, chronos
 import
   logos_delivery/waku/[
     waku_archive,
+    waku_archive/driver/builder,
     waku_archive/driver/postgres_driver,
+    waku_archive/driver/postgres_driver/migrations as postgres_migrations,
     waku_core,
     waku_core/message/digest,
     common/databases/db_postgres/pgasyncpool,
@@ -16,6 +18,23 @@ import
 suite "Postgres driver":
   ## Unique driver instance
   var driver {.threadvar.}: PostgresDriver
+
+  proc temporaryDatabaseName(): string =
+    return "logos_delivery_schema_validation_" & $getCurrentProcessId()
+
+  proc createTemporaryDatabase(dbName: string) {.async.} =
+    let pool = PgAsyncPool.new(storeMessageDbUrl, 1).expect("admin pool")
+    (await pool.pgQuery("DROP DATABASE IF EXISTS " & dbName)).expect("drop database")
+    (await pool.pgQuery("CREATE DATABASE " & dbName)).expect("create database")
+    (await pool.close()).expect("close admin pool")
+
+  proc dropTemporaryDatabase(dbName: string) {.async.} =
+    let pool = PgAsyncPool.new(storeMessageDbUrl, 1).expect("admin pool")
+    (await pool.pgQuery("DROP DATABASE IF EXISTS " & dbName)).expect("drop database")
+    (await pool.close()).expect("close admin pool")
+
+  proc temporaryDatabaseUrl(dbName: string): string =
+    return "postgres://postgres:test123@localhost:5432/" & dbName
 
   asyncSetup:
     let driverRes = await newTestPostgresDriver()
@@ -44,6 +63,47 @@ suite "Postgres driver":
     let diff = now() - beforeSleep
 
     assert diff < 2_000_000_000 ## nanoseconds
+
+  asyncTest "fresh and upgraded schemas validate Store tables":
+    let dbName = temporaryDatabaseName()
+    var temporaryDriver: PostgresDriver
+    await createTemporaryDatabase(dbName)
+    try:
+      temporaryDriver = PostgresDriver
+        .new(temporaryDatabaseUrl(dbName), maxConnections = 4)
+        .expect("temporary driver")
+
+      (await postgres_migrations.migrate(temporaryDriver, targetVersion = 7)).expect(
+        "migrate temporary database to version 7"
+      )
+      check (await temporaryDriver.getCurrentVersion()).expect("version 7") == 7
+
+      (await postgres_migrations.migrate(temporaryDriver)).expect(
+        "upgrade temporary database to current version"
+      )
+      check (await postgres_migrations.validateSchema(temporaryDriver)).isOk()
+      check (await temporaryDriver.existsTable("messages_lookup")).expect(
+        "messages_lookup table"
+      )
+
+      (await temporaryDriver.performWriteQuery("DROP TABLE messages_lookup CASCADE")).expect(
+        "drop lookup table"
+      )
+      let invalidSchema = await postgres_migrations.validateSchema(temporaryDriver)
+      check invalidSchema.isErr()
+      check invalidSchema.error.contains("messages_lookup")
+
+      (await temporaryDriver.close()).expect("close temporary driver")
+      temporaryDriver = nil
+
+      let builderResult =
+        await ArchiveDriver.new(temporaryDatabaseUrl(dbName), false, false, 4, nil)
+      check builderResult.isErr()
+      check builderResult.error.contains("messages_lookup")
+    finally:
+      if not temporaryDriver.isNil:
+        discard await temporaryDriver.close()
+      await dropTemporaryDatabase(dbName)
 
   asyncTest "Insert a message":
     const contentTopic = "test-content-topic"

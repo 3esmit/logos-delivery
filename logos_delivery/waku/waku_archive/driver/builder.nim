@@ -78,8 +78,25 @@ proc new*(
 
       # Database migration
       if migrate:
-        (await archive_postgres_driver_migrations.migrate(driver)).isOkOr:
-          return err("ArchiveDriver build failed in migration: " & $error)
+        let migrationResult = await archive_postgres_driver_migrations.migrate(driver)
+        if migrationResult.isErr():
+          let closeResult = await driver.close()
+          if closeResult.isErr():
+            error "failed to close archive driver after migration error",
+              error = closeResult.error
+          return
+            err("ArchiveDriver build failed in migration: " & migrationResult.error)
+      else:
+        let validationResult =
+          await archive_postgres_driver_migrations.validateSchema(driver)
+        if validationResult.isErr():
+          let closeResult = await driver.close()
+          if closeResult.isErr():
+            error "failed to close archive driver after schema validation error",
+              error = closeResult.error
+          return err(
+            "ArchiveDriver build rejected database schema: " & validationResult.error
+          )
 
       ## This should be started once we make sure the 'messages' table exists
       ## Hence, this should be run after the migration is completed.
