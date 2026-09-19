@@ -5,7 +5,7 @@
 ##
 
 import std/[deques, times]
-import chronos, chronicles
+import chronos, chronicles, results
 import ../../../waku_core/time
 
 logScope:
@@ -94,6 +94,12 @@ proc removeOldestPartitionName*(self: PartitionManager, expectedName: string) =
 
 proc isEmpty*(self: PartitionManager): bool =
   return self.partitions.len == 0
+
+proc hasCurrentPartition*(self: PartitionManager, targetMoment: int64): bool =
+  ## Reports whether one of the tracked partitions can accept a message now.
+  ## A non-empty manager may still be stale after a long downtime or a failed
+  ## maintenance pass, so checking only `isEmpty` is not sufficient.
+  return self.getPartitionFromDateTime(targetMoment).isOk()
 
 proc getLastMoment*(partition: Partition): int64 =
   ## Considering the time range covered by the partition, this
