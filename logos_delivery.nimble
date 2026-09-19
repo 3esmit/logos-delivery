@@ -10,13 +10,13 @@ description = "Logos-delivery, Private P2P Messaging for Resource-Restricted Dev
 license = "MIT or Apache License 2.0"
 skipDirs = @["tests", "examples", "tools", "apps", "simulations", "metrics"]
 
-const RequiredNimVersion = "2.2.4"
+const RequiredNimVersion = "2.2.6"
   ## This is the nim compiler version that we are working on. Other versions may behave differently.
-const RequiredNimbleVersion = "0.22.3"
+const RequiredNimbleVersion = "0.24.1"
   ## Enforced nimble version to ensure a reproducible flow
 
 ### Dependencies
-requires "nim >= 2.2.4",
+requires "nim >= 2.2.6",
   "chronos >= 4.2.0 & < 4.4.0",
   "taskpools",
   # Logging & Configuration
