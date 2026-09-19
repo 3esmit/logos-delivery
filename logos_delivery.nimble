@@ -28,21 +28,21 @@ requires "nim >= 2.2.6",
   "toml_serialization",
   "faststreams",
   # Networking & P2P
-  "https://github.com/vacp2p/nim-libp2p.git#v2.0.0",
-  "eth",
+  "libp2p == 2.0.0",
+  "eth == 0.9.0",
   "nat_traversal",
   "dnsdisc",
   "dnsclient",
   "httputils >= 0.4.1",
-  "websock >= 0.3.0",
+  "websock >= 0.3.0 & < 0.4.2",
   # Cryptography
   "nimcrypto == 0.6.4", # 0.6.4 used in libp2p. Version 0.7.3 makes test to crash on Ubuntu.
-  "secp256k1",
+  "https://github.com/status-im/nim-secp256k1#d8f1288b7c72f00be5fc2c5ea72bf5cae1eafb15",
   "bearssl",
   # RPC & APIs
-  "https://github.com/status-im/nim-json-rpc.git#v0.6.1",
+  "https://github.com/status-im/nim-json-rpc.git#6f1fff8ba685c9192fab153a9d66484ad9066e78",
   "presto",
-  "web3",
+  "web3 == 0.8.0",
   # Database
   "db_connector",
   "sqlite3_abi",
@@ -68,7 +68,8 @@ requires "https://github.com/logos-messaging/nim-sds.git#b12f5ee07c5b764303b51fb
 
 requires "https://github.com/NagyZoltanPeter/nim-brokers.git#v3.3.0"
 
-requires "https://github.com/vacp2p/nim-lsquic.git#v0.5.1"
+requires "https://github.com/vacp2p/nim-lsquic.git == 0.5.1"
+requires "https://github.com/vacp2p/nim-boringssl == 0.0.8"
 requires "https://github.com/vacp2p/nim-jwt.git#057ec95eb5af0eea9c49bfe9025b3312c95dc5f2"
 requires "https://github.com/logos-co/nim-libp2p-mix#380513117d556bf8f70066f5e72a7fd74fe36ba6"
 
